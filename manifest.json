@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Arc Lite",
   "version": "1.6.0",
-  "description": "Arc-style action bar: copy URL (Cmd+Shift+C) and downloads.",
+  "description": "A floating action bar, command bar, custom start page and session restore, inspired by Arc.",
   "minimum_chrome_version": "116",
   "permissions": [
     "activeTab",
