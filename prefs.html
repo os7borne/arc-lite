@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Arc Lite Settings</title>
+<link rel="stylesheet" href="prefs.css">
+</head>
+<body>
+<nav>
+  <h1>Settings</h1>
+  <a href="#general" class="on">General</a>
+  <a href="#start">Start page</a>
+  <a href="#commandbar">Command bar</a>
+  <a href="#bar">Action bar</a>
+  <a href="#media">Media player</a>
+  <a href="#downloads">Downloads</a>
+  <a href="#copyurl">Copy URL</a>
+  <a href="#session">Session restore</a>
+  <a href="#reset">Reset</a>
+</nav>
+
+<main>
+  <section id="general">
+    <h2>General</h2>
+    <div class="card">
+      <label class="row"><span>Clicking the toolbar icon opens</span>
+        <select data-key="toolbar.action">
+          <option value="settings">Settings</option>
+          <option value="start">A new tab (start page)</option>
+          <option value="downloads">Downloads folder</option>
+        </select></label>
+    </div>
+  </section>
+
+  <section id="start">
+    <h2>Start page</h2>
+    <div class="card">
+      <label class="row"><span>Clock</span><input type="checkbox" class="sw" data-key="newtab.clock"></label>
+      <label class="row"><span>24-hour time</span><input type="checkbox" class="sw" data-key="newtab.clock24"></label>
+      <label class="row"><span>Greeting</span><input type="checkbox" class="sw" data-key="newtab.greeting"></label>
+      <label class="row"><span>Your name <small>shown in the greeting</small></span>
+        <input type="text" data-key="newtab.name" maxlength="30" placeholder="Optional"></label>
+      <label class="row"><span>Search box</span><input type="checkbox" class="sw" data-key="newtab.search"></label>
+      <label class="row"><span>Put the cursor in the search box on new tabs <small>experimental: briefly swaps the new tab for an identical one</small></span>
+        <input type="checkbox" class="sw" data-key="newtab.focusSearch"></label>
+      <label class="row"><span>Today list</span><input type="checkbox" class="sw" data-key="newtab.todo"></label>
+      <label class="row"><span>Tasks per day</span>
+        <select data-key="newtab.todoSlots" data-number>
+          <option>1</option><option>2</option><option>3</option><option>4</option>
+          <option>5</option><option>6</option><option>7</option><option>8</option>
+        </select></label>
+    </div>
+
+    <h3>Background</h3>
+    <div class="card">
+      <div class="row"><span>Style</span>
+        <div class="seg" id="bgType">
+          <button data-value="gradient">Gradient</button>
+          <button data-value="solid">Color</button>
+          <button data-value="daily">Daily photo</button>
+          <button data-value="image">My photo</button>
+        </div>
+      </div>
+      <div class="row sub" id="bgGradient"><span>Gradient</span>
+        <div class="swatches" id="gradients">
+          <button data-value="aurora" title="Aurora"></button>
+          <button data-value="dusk" title="Dusk"></button>
+          <button data-value="mint" title="Mint"></button>
+          <button data-value="peach" title="Peach"></button>
+          <button data-value="graphite" title="Graphite"></button>
+        </div>
+      </div>
+      <div class="row sub" id="bgSolid"><span>Color</span><input type="color" data-key="newtab.background.color"></div>
+      <div class="row sub" id="bgDaily"><span>Source <small id="dailyState"></small></span>
+        <div class="inline">
+          <select id="photoSource">
+            <option value="bing">Bing</option>
+            <option value="wikipedia">Wikipedia</option>
+            <option value="nasa">NASA</option>
+            <option value="picsum">Picsum (random)</option>
+          </select>
+          <button class="btn ghost" id="refreshPhoto">New photo</button>
+        </div>
+      </div>
+      <label class="row sub" id="bgOvernight"><span>Refresh overnight <small>fetch the next photo shortly after midnight, so it's ready in the morning</small></span>
+        <input type="checkbox" class="sw" data-key="newtab.background.overnight"></label>
+      <div class="row sub" id="bgImage"><span>Your photo <small id="imgState">None chosen</small></span>
+        <div class="inline">
+          <button class="btn" id="pickImage">Choose…</button>
+          <button class="btn ghost" id="removeImage" hidden>Remove</button>
+          <input type="file" id="file" accept="image/*" hidden>
+        </div>
+      </div>
+      <div class="row sub" id="bgDim"><span>Dim</span>
+        <div class="inline"><input type="range" min="0" max="80" data-key="newtab.background.dim"><output></output></div></div>
+      <div class="row sub" id="bgBlur"><span>Blur</span>
+        <div class="inline"><input type="range" min="0" max="24" data-key="newtab.background.blur"><output></output></div></div>
+    </div>
+    <p class="note">The start page applies changes immediately. Turning the start page off completely means removing the "new tab override" by disabling the extension.</p>
+  </section>
+
+  <section id="commandbar">
+    <h2>Command bar</h2>
+    <div class="card">
+      <label class="row"><span>Command bar <small>search tabs, history and actions from any page</small></span>
+        <input type="checkbox" class="sw" data-key="commandBar.enabled"></label>
+      <div class="row"><span>Shortcut <small>click, then press the keys you want</small></span>
+        <div class="inline"><button class="btn ghost" id="shortcutBtn"></button><button class="btn ghost" id="shortcutReset">Reset</button></div></div>
+      <label class="row"><span>Open results in</span>
+        <select data-key="commandBar.openIn">
+          <option value="new">A new tab</option>
+          <option value="current">The current tab</option>
+        </select></label>
+    </div>
+    <p class="note">Hold Shift while pressing Enter to use the other choice. Type &gt; first to see only actions. On browser pages such as chrome://settings, where a page can't be drawn on, it opens as a small window; set a browser shortcut under Copy URL → Browser shortcuts for that case. The default shortcut is ⌘T, which replaces opening a new tab on web pages; on browser pages and anywhere the bar can't run, ⌘T still opens a normal new tab.</p>
+  </section>
+
+  <section id="bar">
+    <h2>Action bar</h2>
+    <div class="card">
+      <label class="row"><span>Show the action bar <small>the corner bar on web pages</small></span>
+        <input type="checkbox" class="sw" data-key="bar.enabled"></label>
+      <label class="row"><span>Media player button</span><input type="checkbox" class="sw" data-key="buttons.media"></label>
+      <label class="row"><span>Downloads button</span><input type="checkbox" class="sw" data-key="buttons.downloads"></label>
+      <label class="row"><span>Copy URL button</span><input type="checkbox" class="sw" data-key="buttons.copyUrl"></label>
+    </div>
+    <p class="note">The bar can't appear on browser pages such as chrome:// settings or the Web Store; Chrome doesn't allow extensions there.</p>
+  </section>
+
+  <section id="media">
+    <h2>Media player</h2>
+    <div class="card">
+      <div class="row"><span>Open the full player when media starts <small>seconds; 0 = never</small></span>
+        <div class="inline"><input type="range" min="0" max="15" data-key="media.announceSeconds"><output></output></div></div>
+    </div>
+
+    <h3>Hide the player on these sites</h3>
+    <p class="note">The player won't show while you're on them. Media from other sites still plays and shows elsewhere.</p>
+    <div class="card"><div class="list" data-key="media.hideOnSites"></div></div>
+
+    <h3>Ignore media from these sites</h3>
+    <p class="note">The player never lists media coming from them, on any page.</p>
+    <div class="card"><div class="list" data-key="media.ignoreSites"></div></div>
+  </section>
+
+  <section id="downloads">
+    <h2>Downloads</h2>
+    <div class="card">
+      <label class="row"><span>Hide the browser's own downloads popup <small>the action bar replaces it</small></span>
+        <input type="checkbox" class="sw" data-key="downloads.hideNativeUi"></label>
+      <div class="row"><span>Show a new download for <small>seconds</small></span>
+        <div class="inline"><input type="range" min="2" max="20" data-key="downloads.showSeconds"><output></output></div></div>
+    </div>
+  </section>
+
+  <section id="copyurl">
+    <h2>Copy URL</h2>
+    <div class="card">
+      <label class="row"><span>⌘⇧C on web pages <small>works without assigning a shortcut in Chrome</small></span>
+        <input type="checkbox" class="sw" data-key="copyUrl.shortcut"></label>
+      <div class="row"><span>Browser shortcuts <small>needed for pages the bar can't run on</small></span>
+        <button class="btn" id="shortcuts">Open shortcut settings</button></div>
+    </div>
+  </section>
+
+  <section id="session">
+    <h2>Session restore</h2>
+    <div class="card">
+      <label class="row"><span>Reopen my tabs when the browser starts <small>only if the browser didn't restore them itself</small></span>
+        <input type="checkbox" class="sw" data-key="session.restoreOnStartup"></label>
+      <div class="row"><span>Saved session <small id="sessionInfo"></small></span>
+        <button class="btn ghost" id="forget">Forget it</button></div>
+    </div>
+  </section>
+
+  <section id="reset">
+    <h2>Reset</h2>
+    <div class="card">
+      <div class="row"><span>Restore every setting to its default <small>your tasks and photo are kept</small></span>
+        <button class="btn danger" id="resetAll">Reset settings</button></div>
+    </div>
+  </section>
+</main>
+
+<div id="saved">Saved</div>
+<script src="settings.js"></script>
+<script src="prefs.js"></script>
+</body>
+</html>
