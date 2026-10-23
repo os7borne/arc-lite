@@ -10,7 +10,7 @@
     toolbar: { action: 'settings' }, // what clicking the extension icon does: settings | start | downloads
     bar: { enabled: true },
     buttons: { downloads: true, copyUrl: true, media: true },
-    media: { announceSeconds: 5, hideOnSites: [], ignoreSites: [] },
+    media: { autoPip: true, announceSeconds: 5, hideOnSites: [], ignoreSites: [] },
     downloads: { hideNativeUi: true, showSeconds: 6 },
     copyUrl: { shortcut: true },
     session: { restoreOnStartup: true },

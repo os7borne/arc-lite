@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Arc Lite",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "description": "A floating action bar, command bar, custom start page and session restore, inspired by Arc.",
   "minimum_chrome_version": "116",
   "permissions": [
@@ -67,11 +67,22 @@
         "<all_urls>"
       ],
       "js": [
+        "settings.js",
         "media-agent.js"
       ],
       "all_frames": true,
       "match_about_blank": true,
       "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "pip-shim.js"
+      ],
+      "world": "MAIN",
+      "run_at": "document_start"
     },
     {
       "matches": [

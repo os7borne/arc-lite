@@ -316,6 +316,7 @@ chrome.runtime.onInstalled.addListener(async () => {
         target: { tabId: t.id },
         files: ['settings.js', 'action-bar.js', 'buttons/media.js', 'buttons/downloads.js', 'buttons/copy-url.js']
       });
+      await chrome.scripting.executeScript({ target: { tabId: t.id }, files: ['pip-shim.js'], world: 'MAIN' });
       await chrome.scripting.executeScript({ target: { tabId: t.id, allFrames: true }, files: ['media-agent.js'] });
     } catch (_) {
       // discarded or restricted tab: it picks the scripts up on its next load
