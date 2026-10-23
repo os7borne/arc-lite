@@ -146,6 +146,8 @@ async function broadcast() {
   for (const t of tabs) {
     chrome.tabs.sendMessage(t.id, { type: 'downloads', ...state }).catch(() => {});
   }
+  // onChanged doesn't fire for byte counts, so keep polling while a download is running.
+  if (state.remaining < 0) setTimeout(throttledBroadcast, 700);
 }
 
 let pending = false;
