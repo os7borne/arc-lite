@@ -1,6 +1,6 @@
 // Media button: one mini pill per playing source, stacked above the bar corner. Paused sources only
 // show while the bar is hovered. New media expands to its full player for a few seconds; hovering a pill
-// expands it into the full player in place.
+// expands it into the full player in place. While a download chip is open, the stack lifts above the bar.
 (() => {
   const actionBar = globalThis.__actionBar;
   if (!actionBar) return;
@@ -234,6 +234,7 @@
 
   actionBar.register({
     id: 'media',
+    lift: true,
     title: '',
     icon: '',
     css,

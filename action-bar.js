@@ -17,7 +17,7 @@
       @media (prefers-reduced-motion: reduce) {
         * { transition-duration: .01ms !important; animation-duration: .01ms !important; }
       }
-      .bar { --ease: cubic-bezier(.2,.8,.2,1);
+      .bar { --ease: cubic-bezier(.2,.8,.2,1); position: relative;
              font: 13px -apple-system, system-ui, sans-serif; color: #f2f2f7;
              display: flex; align-items: flex-end; gap: 6px; }
       .slot { position: relative; display: none; flex-direction: column; align-items: flex-start; }
@@ -37,6 +37,11 @@
       .slot.on .chip { display: flex; animation: pop-in .25s var(--ease); }
       .pop { display: none; position: absolute; bottom: 100%; left: 0; padding-bottom: 6px; }
       .slot:hover .pop:not(:empty) { display: block; animation: pop-in .18s var(--ease); }
+      /* While a chip is open, a lifting slot (media) moves above the bar instead of pushing the chip aside.
+         The padding bridges the gap so the bar stays hovered. It hides while another slot's popover is open. */
+      .slot.lift { transition: opacity .15s; }
+      .bar.stack .slot.lift { position: absolute; left: 0; bottom: 100%; padding-bottom: 6px; }
+      .bar.stack:has(.slot:not(.lift):hover .pop:not(:empty)) .slot.lift { opacity: 0; pointer-events: none; }
       .toast { position: fixed; top: 16px; left: 50%; transform: translateX(-50%); padding: 8px 14px;
                border-radius: 10px; background: #1c1c1e; color: #fff; box-shadow: 0 4px 16px rgba(0,0,0,.3);
                opacity: 0; pointer-events: none; transition: opacity .3s; }
@@ -71,12 +76,43 @@
     toastTimer = setTimeout(() => toastEl.classList.remove('on'), 1200);
   }
 
-  // The bar collapses to the handle icon unless a button is showing something (a chip, or "live").
+  const slotsShown = () => [...bar.querySelectorAll('.slot')].filter(s => s.style.display !== 'none');
+
+  // The bar collapses to the handle icon unless a button is showing something (a chip, or "live"). While a
+  // chip is open the bar stacks: lifting slots move above it.
   function refresh() {
-    const busy = [...bar.querySelectorAll('.slot')].some(s =>
-      s.style.display !== 'none' && (s.classList.contains('on') || s.classList.contains('live')));
+    const shown = slotsShown();
+    const busy = shown.some(s => s.classList.contains('on') || s.classList.contains('live'));
     bar.classList.toggle('idle', !busy);
+    const chip = shown.some(s => s.classList.contains('on') && !s.classList.contains('lift'));
+    // Un-stacking waits until the cursor leaves, so a pill doesn't drop out from under it.
+    if (chip || !bar.matches(':hover')) bar.classList.toggle('stack', chip);
   }
+
+  // Runs a layout change, then slides every slot that moved from where it was to where it is now.
+  const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
+  const slides = new Map(); // slot -> running slide
+  function layout(change) {
+    const rect = s => s.getBoundingClientRect();
+    const before = new Map(slotsShown().map(s => [s, rect(s)]));
+    slides.forEach(a => a.cancel());
+    slides.clear();
+    change();
+    if (reduceMotion.matches) return;
+    for (const s of slotsShown()) {
+      const a = before.get(s);
+      const b = rect(s);
+      if (!a || !a.width || !b.width) continue;
+      const dx = a.left - b.left;
+      const dy = a.top - b.top;
+      if (Math.abs(dx) < 1 && Math.abs(dy) < 1) continue;
+      const anim = s.animate([{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'none' }],
+        { duration: 320, easing: 'cubic-bezier(.2,.8,.2,1)' });
+      slides.set(s, anim);
+      anim.onfinish = anim.oncancel = () => slides.get(s) === anim && slides.delete(s);
+    }
+  }
+  bar.addEventListener('mouseleave', () => layout(refresh));
 
   const messageHandlers = [];
   if (alive()) {
@@ -86,10 +122,12 @@
     });
   }
 
-  // def: { id, title, icon (svg string), onClick?, css?, onMessage?(msg), setup?(ctx) }
+  // def: { id, title, icon (svg string), onClick?, css?, lift?, onMessage?(msg), setup?(ctx) }
+  // lift: this slot moves above the bar, instead of beside the chip, while another button's chip is open.
   function register(def) {
     const slot = document.createElement('div');
     slot.className = `slot ${def.id}`;
+    if (def.lift) slot.classList.add('lift');
     const pop = document.createElement('div');
     pop.className = 'pop';
     const chip = document.createElement('div');
@@ -123,7 +161,9 @@
     const ctx = {
       pop, chip, btn, send, toast,
       // on: show the chip. live: keep this button showing while the bar is collapsed.
-      setActive: on => { slot.classList.toggle('on', on); refresh(); },
+      setActive: on => {
+        if (slot.classList.contains('on') !== on) layout(() => { slot.classList.toggle('on', on); refresh(); });
+      },
       setLive: on => { slot.classList.toggle('live', on); refresh(); },
       setVisible: on => { shown = on; refreshSlot(); refresh(); },
       setEnabled: on => { siteOn = on; refreshSlot(); refresh(); },
