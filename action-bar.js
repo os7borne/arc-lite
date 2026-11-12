@@ -35,8 +35,12 @@
       .chip { display: none; align-items: center; gap: 10px; width: 280px; padding: 8px 12px; cursor: pointer;
               background: rgba(28,28,30,.96); border-radius: 12px; box-shadow: 0 6px 24px rgba(0,0,0,.35); }
       .slot.on .chip { display: flex; animation: pop-in .25s var(--ease); }
-      .pop { display: none; position: absolute; bottom: 100%; left: 0; padding-bottom: 6px; }
-      .slot:hover .pop:not(:empty) { display: block; animation: pop-in .18s var(--ease); }
+      /* Hides after a short grace period instead of instantly, so a diagonal move from the (narrow) button to
+         the (wide) popover doesn't clip the slot's corner and close it. It stays hoverable until it is hidden. */
+      .pop { position: absolute; bottom: 100%; left: 0; padding-bottom: 6px; visibility: hidden; opacity: 0;
+             transition: opacity .15s .3s, visibility 0s .45s; }
+      .slot:hover .pop:not(:empty) { visibility: visible; opacity: 1; transition: none;
+                                     animation: pop-in .18s var(--ease); }
       /* While a chip is open, a lifting slot (media) moves above the bar instead of pushing the chip aside.
          The padding bridges the gap so the bar stays hovered. It hides while another slot's popover is open. */
       .slot.lift { transition: opacity .15s; }
@@ -159,7 +163,7 @@
     slotRefreshers.push(refreshSlot);
 
     const ctx = {
-      pop, chip, btn, send, toast,
+      pop, chip, btn, send, toast, root,
       // on: show the chip. live: keep this button showing while the bar is collapsed.
       setActive: on => {
         if (slot.classList.contains('on') !== on) layout(() => { slot.classList.toggle('on', on); refresh(); });

@@ -114,6 +114,7 @@
       play: button(playIcon(16), 'Play', 'toggle', undefined, 'main'),
       fwd: button('+10', 'Forward 10 seconds', 'seek', 10),
       next: button(NEXT, 'Next', 'next'),
+      mute: button(volumeIcon(16), 'Mute', 'mute'),
       pip: pipButton(16)
     };
     e.miniNote.innerHTML = svg(18, NOTE);
@@ -123,7 +124,7 @@
     txt.append(e.nm, e.st);
     txt.onclick = e.art.onclick = e.miniArt.onclick = () => control('focus');
     const ctl = el('div', 'ctl');
-    ctl.append(e.prev, e.back, e.play, e.fwd, e.next, e.pip);
+    ctl.append(e.prev, e.back, e.play, e.fwd, e.next, e.mute, e.pip);
     const player = el('div', 'player');
     player.append(e.art, txt, ctl, e.prog);
     const wrap = el('div', 'pwrap');
@@ -184,7 +185,9 @@
     e.miniPlay.innerHTML = view.playing ? pauseIcon(14) : playIcon(14);
     e.miniPlay.title = e.play.title;
     e.miniMute.innerHTML = view.muted ? mutedIcon(14) : volumeIcon(14);
-    e.miniMute.title = view.muted ? 'Unmute' : 'Mute';
+    e.miniMute.title = e.mute.title = view.muted ? 'Unmute' : 'Mute';
+    e.mute.innerHTML = view.muted ? mutedIcon(16) : volumeIcon(16);
+    e.mute.classList.toggle('main', !!view.muted);
     e.pip.style.display = e.miniPip.style.display = view.canPip ? '' : 'none';
     e.pip.classList.toggle('main', !!view.pip);
     e.pip.title = e.miniPip.title = view.pip ? 'Exit picture-in-picture' : 'Picture-in-picture';

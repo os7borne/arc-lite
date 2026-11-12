@@ -74,6 +74,9 @@
     style.textContent = `
       html, body { margin: 0; height: 100%; background: #000; overflow: hidden;
                    font: 12px -apple-system, system-ui, sans-serif; color: #fff; }
+      video { position: fixed !important; inset: 0 !important; width: 100% !important; height: 100% !important;
+              max-width: none !important; max-height: none !important; object-fit: contain !important;
+              transform: none !important; margin: 0 !important; background: #000; }
       .ui { position: fixed; inset: 0; opacity: 0; transition: opacity .15s;
             background: linear-gradient(rgba(0,0,0,.6), transparent 35%, transparent 60%, rgba(0,0,0,.7)); }
       body:hover .ui, body.paused .ui { opacity: 1; }
@@ -169,7 +172,9 @@
     video.addEventListener('pause', syncPlay);
     syncAll();
 
-    // The page's own styles don't reach this window, but inline ones the site set on the video do.
+    // The page's own stylesheets don't reach this window, but inline styles the site set on the video do, and
+    // YouTube keeps rewriting them (pixel width/height/left/top) as its player resizes. Inline !important gets
+    // dropped on those rewrites, so the sizing lives in the stylesheet above, where !important beats any inline.
     const marker = document.createComment('arc-lite-pip');
     const prevStyle = video.getAttribute('style');
     video.parentNode.insertBefore(marker, video);

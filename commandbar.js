@@ -54,6 +54,31 @@ async function copy(text) {
   }
 }
 
+// Pull every http(s) URL out of a block of text.
+const urlsIn = text => [...new Set((text.match(/https?:\/\/[^\s<>"')\]]+/gi) || []).map(u => u.replace(/[.,;:!?]+$/, '')))];
+
+// The URL without tracking junk (utm_*, fbclid, gclid, ...).
+function cleanUrl(url) {
+  try {
+    const u = new URL(url);
+    for (const k of [...u.searchParams.keys()]) {
+      if (/^(utm_|mc_|ga_|pk_)/i.test(k) || /^(fbclid|gclid|dclid|msclkid|igshid|yclid|_hsenc|_hsmi|ref_src|si)$/i.test(k)) u.searchParams.delete(k);
+    }
+    return u.toString();
+  } catch (_) { return url; }
+}
+
+async function pasteAndGo(alt) {
+  const text = (await navigator.clipboard.readText().catch(() => '')).trim();
+  if (!text) return;
+  if (looksLikeUrl(text)) await openUrl(toUrl(text), alt); else await openSearch(text, alt);
+}
+
+async function openClipboardUrls() {
+  const urls = urlsIn(await navigator.clipboard.readText().catch(() => ''));
+  for (const url of urls.slice(0, 30)) await chrome.tabs.create({ url, windowId: tab?.windowId, active: false });
+}
+
 async function findTab() {
   if (params.has('tab')) return chrome.tabs.get(Number(params.get('tab'))).catch(() => null);
   const current = await chrome.tabs.getCurrent().catch(() => null);
@@ -122,6 +147,20 @@ function buildActions() {
       { title: 'Move tab to new window', keywords: 'detach', run: () => chrome.windows.create({ tabId: t.id }) },
       { title: 'Close tab', keywords: 'remove', run: () => chrome.tabs.remove(t.id) }
     );
+    const winTabs = allTabs.filter(x => x.windowId === t.windowId && !x.url.startsWith(own));
+    const picked = winTabs.filter(x => x.highlighted);
+    const clip = (label, keywords, tabs, fmt) =>
+      tabs.length > 1 && list.push({ title: `${label} (${tabs.length})`, keywords: `copy clipboard ${keywords}`, run: () => copy(tabs.map(fmt).join('\n')) });
+    list.push(
+      { title: 'Copy page title', keywords: 'clipboard name', run: () => copy(t.title || '') },
+      { title: 'Copy clean URL', keywords: 'clipboard link tracking utm strip', run: () => copy(cleanUrl(t.url)) }
+    );
+    if (picked.length > 1) {
+      clip('Copy selected tab URLs', 'selected highlighted', picked, x => x.url);
+      clip('Copy selected tabs as Markdown list', 'selected highlighted md links', picked, x => `- [${x.title}](${x.url})`);
+    }
+    clip('Copy all tab URLs', 'links window', winTabs, x => x.url);
+    clip('Copy all tabs as Markdown list', 'md links window', winTabs, x => `- [${x.title}](${x.url})`);
     if (others.length) {
       list.push(
         { title: `Sleep other tabs (${others.length})`, keywords: 'discard suspend memory', run: () => Promise.all(others.map(x => chrome.tabs.discard(x.id).catch(() => {}))) },
@@ -129,6 +168,10 @@ function buildActions() {
       );
     }
   }
+  list.push(
+    { title: 'Paste and go', keywords: 'clipboard open url search', run: pasteAndGo },
+    { title: 'Open URLs from clipboard', keywords: 'paste links tabs', run: openClipboardUrls }
+  );
   list.push(
     { title: 'Open Downloads folder', keywords: 'files', run: () => chrome.downloads.showDefaultFolder() },
     { title: 'Downloads page', keywords: 'history', run: () => chrome.tabs.create({ url: 'chrome://downloads' }) },
@@ -149,7 +192,7 @@ async function compute(raw) {
   const out = [];
 
   const tabRow = (t, tag = 'Tab') => ({
-    type: 'tab', title: t.title || t.url, sub: hostOf(t.url), icon: favicon(t.url), tag, tabId: t.id,
+    type: 'tab', key: 'u:' + t.url, title: t.title || t.url, sub: hostOf(t.url), icon: favicon(t.url), tag, tabId: t.id,
     run: async () => {
       await chrome.tabs.update(t.id, { active: true });
       await chrome.windows.update(t.windowId, { focused: true });
@@ -159,10 +202,10 @@ async function compute(raw) {
     const isTab = !!s.tab;
     const title = isTab ? s.tab.title || s.tab.url : `Window with ${s.window.tabs.length} tabs`;
     const url = isTab ? s.tab.url : s.window.tabs[0]?.url;
-    return { type: 'closed', title, url, sub: isTab ? hostOf(s.tab.url) : '', icon: url ? favicon(url) : '', glyph: ICONS.undo,
+    return { type: 'closed', key: 'u:' + url, title, url, sub: isTab ? hostOf(s.tab.url) : '', icon: url ? favicon(url) : '', glyph: ICONS.undo,
              tag: 'Closed', run: () => chrome.sessions.restore(isTab ? s.tab.sessionId : s.window.sessionId) };
   };
-  const actionRow = a => ({ type: 'action', title: a.title, sub: '', glyph: ICONS.action, tag: 'Action', run: a.run });
+  const actionRow = a => ({ type: 'action', key: 'a:' + a.title.replace(/\s*\(\d+\)$/, ''), title: a.title, sub: '', glyph: ICONS.action, tag: 'Action', run: a.run });
 
   // The extension's own pages (start page, settings) aren't offered as tabs to jump to.
   const openTabs = allTabs.filter(t => !t.url.startsWith(own));
@@ -183,8 +226,8 @@ async function compute(raw) {
     .filter(x => x.s >= 0).sort((x, y) => y.s - x.s).map(x => actionRow(x.a));
   if (actionOnly) return actions;
 
-  if (looksLikeUrl(query)) {
-    out.push({ type: 'go', title: query, sub: 'Open', glyph: ICONS.go, tag: 'Go', run: alt => openUrl(toUrl(query), alt) });
+  if (looksLikeUrl(query) || (ghost && query === ghost)) {
+    out.push({ type: 'go', key: 'u:' + toUrl(query), title: query, sub: 'Open', glyph: ICONS.go, tag: 'Go', run: alt => openUrl(toUrl(query), alt) });
   }
 
   const rank = new Map(byRecent.map((t, i) => [t.id, i]));
@@ -203,16 +246,89 @@ async function compute(raw) {
     .map(h => ({ h, s: (h.typedCount || 0) * 4 + (h.visitCount || 0) + 6 / (1 + (now - h.lastVisitTime) / 6048e5) }))
     .sort((x, y) => y.s - x.s).slice(0, 5)
     .forEach(({ h }) => out.push({
-      type: 'history', title: h.title || h.url, sub: hostOf(h.url), icon: favicon(h.url), tag: 'History',
+      type: 'history', key: 'u:' + h.url, title: h.title || h.url, sub: hostOf(h.url), icon: favicon(h.url), tag: 'History',
       run: alt => openUrl(h.url, alt)
     }));
 
   closedRows.filter(r => matchScore(`${r.title} ${r.url}`, words) >= 0).slice(0, 3).forEach(r => out.push(r));
 
-  if (!looksLikeUrl(query)) {
+  if (!looksLikeUrl(query) && query !== ghost) {
     out.push({ type: 'search', title: `Search for “${query}”`, sub: '', glyph: ICONS.search, tag: 'Web', run: alt => openSearch(query, alt) });
   }
   return out;
+}
+
+// --- host autocomplete (from history) -----------------------------------------
+
+// Hosts you've visited, best first: typed visits count most, then visits, then recency.
+let hosts = [];
+let ghost = ''; // the host currently suggested inline, if any
+
+async function loadHosts() {
+  const hist = await chrome.history.search({ text: '', maxResults: 5000, startTime: 0 }).catch(() => []);
+  const now = Date.now();
+  const byHost = new Map();
+  for (const h of hist) {
+    if (isInternal(h.url) || !/^https?:/i.test(h.url)) continue;
+    const host = hostOf(h.url);
+    if (!host) continue;
+    const s = (h.typedCount || 0) * 4 + (h.visitCount || 0) + 6 / (1 + (now - h.lastVisitTime) / 6048e5);
+    byHost.set(host, (byHost.get(host) || 0) + s);
+  }
+  hosts = [...byHost].sort((a, b) => b[1] - a[1]).map(x => x[0]);
+}
+
+// Complete a single typed token (no spaces or slashes) to the best host that starts with it.
+function completeHost(typed) {
+  if (!/^[a-z0-9][a-z0-9.-]*$/i.test(typed)) return '';
+  const t = typed.toLowerCase();
+  return hosts.find(h => h.length > t.length && h.startsWith(t)) || '';
+}
+
+// --- learned ranking ----------------------------------------------------------
+
+// What you picked for what you typed, kept on this device: { query: { itemKey: count } }.
+const LEARN_KEY = 'commandBarPicks';
+const LEARN_MAX_QUERIES = 400;
+let picks = {};
+
+// What was actually typed, without the inline host suggestion.
+const typedText = () => (ghost && input.selectionStart !== input.selectionEnd ? input.value.slice(0, input.selectionStart) : input.value);
+
+const loadPicks = () => chrome.storage.local.get(LEARN_KEY).then(r => { picks = r[LEARN_KEY] || {}; }).catch(() => {});
+
+function recordPick(query, key) {
+  const q = query.trim().toLowerCase();
+  if (!q || !key) return;
+  const entry = picks[q] || {};
+  delete picks[q]; // re-insert so the newest queries sit last
+  entry[key] = (entry[key] || 0) + 1;
+  picks[q] = entry;
+  const qs = Object.keys(picks);
+  for (const old of qs.slice(0, Math.max(0, qs.length - LEARN_MAX_QUERIES))) delete picks[old];
+  chrome.storage.local.set({ [LEARN_KEY]: picks }).catch(() => {});
+}
+
+// Picks made for the exact query count fully; picks made for a longer query that starts with it
+// (you typed "gi" and usually finish "github") count in proportion to how much of it you've typed.
+function learnedBoost(query) {
+  const q = query.trim().toLowerCase();
+  const boost = new Map();
+  if (!q) return boost;
+  for (const [pq, entry] of Object.entries(picks)) {
+    if (!pq.startsWith(q)) continue;
+    const w = q.length / pq.length;
+    for (const [key, n] of Object.entries(entry)) boost.set(key, (boost.get(key) || 0) + n * w);
+  }
+  return boost;
+}
+
+// Items you've picked before for this query float to the top, most-picked first; the rest keep their order.
+function applyLearned(rows, query) {
+  const boost = learnedBoost(query.replace(/^>\s*/, ''));
+  if (!boost.size) return rows;
+  const lifted = rows.filter(r => boost.has(r.key)).sort((a, b) => boost.get(b.key) - boost.get(a.key));
+  return [...lifted, ...rows.filter(r => !boost.has(r.key))];
 }
 
 // --- rendering & keys ---------------------------------------------------------
@@ -268,12 +384,13 @@ function markActive() {
 async function run(i, alt) {
   const it = items[i];
   if (!it) return;
+  recordPick(typedText(), it.key);
   try { await it.run(alt); } finally { close(); }
 }
 
 async function refresh() {
   const mine = ++seq;
-  const next = await compute(input.value);
+  const next = applyLearned(await compute(input.value), typedText());
   if (mine !== seq) return; // a newer keystroke is already being worked on
   items = next;
   active = 0;
@@ -281,7 +398,22 @@ async function refresh() {
 }
 
 let timer;
-input.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(refresh, 40); });
+input.addEventListener('input', e => {
+  ghost = '';
+  const typed = input.value;
+  // Don't fight deletions or IME composition; only complete when the caret is at the end.
+  if (settings.commandBar.autocompleteHosts !== false && typed && !e.isComposing && !/^delete/.test(e.inputType || '') &&
+      input.selectionStart === typed.length) {
+    const host = completeHost(typed);
+    if (host) {
+      ghost = host;
+      input.value = host;
+      input.setSelectionRange(typed.length, host.length);
+    }
+  }
+  clearTimeout(timer);
+  timer = setTimeout(refresh, 40);
+});
 
 input.addEventListener('keydown', async e => {
   const n = items.length;
@@ -294,6 +426,9 @@ input.addEventListener('keydown', async e => {
   } else if (e.key === 'Enter') {
     e.preventDefault();
     run(active, e.shiftKey);
+  } else if (e.key === 'Tab' && ghost && input.selectionStart !== input.selectionEnd) {
+    e.preventDefault(); // accept the suggested host
+    input.setSelectionRange(input.value.length, input.value.length);
   } else if (e.key === 'Escape') {
     e.preventDefault();
     close();
@@ -317,6 +452,8 @@ $('#backdrop').addEventListener('mousedown', e => { if (e.target.id === 'backdro
   const newFirst = settings.commandBar.openIn !== 'current';
   $('#primary').textContent = newFirst ? 'new tab' : 'this tab';
   $('#alt').textContent = newFirst ? 'this tab' : 'new tab';
+  loadHosts();
+  await loadPicks();
   await refresh();
   input.focus();
   if (popup) setTimeout(() => window.addEventListener('blur', close), 400);

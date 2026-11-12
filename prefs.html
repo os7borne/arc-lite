@@ -151,6 +151,10 @@
     <div class="card">
       <label class="row"><span>Hide the browser's own downloads popup <small>the action bar replaces it</small></span>
         <input type="checkbox" class="sw" data-key="downloads.hideNativeUi"></label>
+      <label class="row"><span>Drag downloads onto pages <small>drops the file into a page's upload area; Chrome briefly shows a "debugging" banner</small></span>
+        <input type="checkbox" class="sw" data-key="downloads.dragToPage"></label>
+      <label class="row"><span>Show thumbnails <small>previews finished image and video downloads; works best with "Allow access to file URLs" on for Arc Lite in chrome://extensions</small></span>
+        <input type="checkbox" class="sw" data-key="downloads.thumbnails"></label>
       <div class="row"><span>Show a new download for <small>seconds</small></span>
         <div class="inline"><input type="range" min="2" max="20" data-key="downloads.showSeconds"><output></output></div></div>
     </div>

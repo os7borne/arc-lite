@@ -12,6 +12,7 @@ Arc Lite uses browser features to work, and everything it reads or saves stays i
 - **Settings, your to-do list, your own background photos and the session snapshot** are saved in the browser's local extension storage (`chrome.storage`). Nothing is synced or uploaded.
 - **Media on the page** (title, artist, artwork, play state) is read locally to show the mini player. It is not recorded or sent anywhere.
 - **The URL you copy** goes to your clipboard only.
+- **Dragging a download onto a page** uses Chrome's debugger permission for an instant to hand that one file to the page you dropped it on, the same as dragging it in from your file manager. The debugger is detached straight afterwards. You can turn this off in settings.
 
 ## Network requests
 

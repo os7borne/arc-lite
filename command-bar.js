@@ -23,6 +23,7 @@
     frame = document.createElement('iframe');
     frame.src = chrome.runtime.getURL('commandbar.html');
     frame.title = 'Command bar';
+    frame.allow = 'clipboard-read; clipboard-write';
     frame.style.cssText = 'all:initial;position:fixed;inset:0;width:100%;height:100%;border:0;z-index:2147483647;background:transparent;';
     frame.addEventListener('load', () => frame?.contentWindow?.focus());
     document.documentElement.appendChild(frame);

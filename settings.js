@@ -11,7 +11,7 @@
     bar: { enabled: true },
     buttons: { downloads: true, copyUrl: true, media: true },
     media: { autoPip: true, announceSeconds: 5, hideOnSites: [], ignoreSites: [] },
-    downloads: { hideNativeUi: true, showSeconds: 6 },
+    downloads: { hideNativeUi: true, showSeconds: 6, dragToPage: true, thumbnails: true },
     copyUrl: { shortcut: true },
     session: { restoreOnStartup: true },
     newtab: {

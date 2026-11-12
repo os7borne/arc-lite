@@ -4,8 +4,8 @@ async function ensureOffscreen() {
   if (await chrome.offscreen.hasDocument()) return;
   await chrome.offscreen.createDocument({
     url: 'offscreen.html',
-    reasons: ['CLIPBOARD'],
-    justification: 'Copy the current tab URL to the clipboard'
+    reasons: ['CLIPBOARD', 'BLOBS'],
+    justification: 'Copy the current tab URL to the clipboard, and read a still frame from downloaded videos for thumbnails'
   });
 }
 
@@ -118,11 +118,71 @@ chrome.action.onClicked.addListener(async () => {
 const showForMs = () => (Settings.current.downloads.showSeconds ?? 6) * 1000;
 let revealUntil = 0;
 
+// Thumbnails for finished image and video downloads, scaled down and cached. The file itself is read when the extension
+// has "Allow access to file URLs"; otherwise the original address is tried. Failures are cached too.
+const THUMB_SIZE = 96;
+const THUMB_MAX_BYTES = 30 * 1024 * 1024;
+const thumbs = new Map(); // download id -> data URL, or '' when there isn't one
+
+const isImage = d => /^image\/(png|jpe?g|gif|webp|avif|bmp|svg\+xml)$/i.test(d.mime || '') ||
+  /\.(png|jpe?g|gif|webp|avif|bmp|svg)$/i.test(d.filename || '');
+
+const isVideo = d => /^video\/(mp4|webm|quicktime|ogg|x-m4v)$/i.test(d.mime || '') ||
+  /\.(mp4|m4v|mov|webm|ogv)$/i.test(d.filename || '');
+
+async function makeThumb(d) {
+  const sources = [];
+  if (d.filename) sources.push('file://' + d.filename.split('/').map(encodeURIComponent).join('/'));
+  if (/^https?:/i.test(d.url || '')) sources.push(d.url);
+  if (isVideo(d)) {
+    try {
+      await ensureOffscreen();
+      return (await chrome.runtime.sendMessage({ target: 'offscreen', type: 'video-thumb', sources })) || '';
+    } catch (_) { return ''; }
+  }
+  for (const src of sources) {
+    try {
+      const res = await fetch(src, { credentials: 'include' });
+      if (!res.ok) continue;
+      const blob = await res.blob();
+      if (blob.size > THUMB_MAX_BYTES) continue;
+      const bmp = await createImageBitmap(blob);
+      const k = Math.max(THUMB_SIZE / bmp.width, THUMB_SIZE / bmp.height); // cover the square
+      const w = Math.round(bmp.width * k), h = Math.round(bmp.height * k);
+      const canvas = new OffscreenCanvas(THUMB_SIZE, THUMB_SIZE);
+      canvas.getContext('2d').drawImage(bmp, (THUMB_SIZE - w) / 2, (THUMB_SIZE - h) / 2, w, h);
+      bmp.close();
+      const out = await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.8 });
+      const bytes = new Uint8Array(await out.arrayBuffer());
+      let bin = '';
+      for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+      return `data:image/jpeg;base64,${btoa(bin)}`;
+    } catch (_) { /* try the next source */ }
+  }
+  return '';
+}
+
+async function thumbFor(d) {
+  if (Settings.current.downloads.thumbnails === false) return '';
+  if (d.state !== 'complete' || d.exists === false || !(isImage(d) || isVideo(d))) return '';
+  if (!thumbs.has(d.id)) {
+    thumbs.set(d.id, ''); // placeholder so concurrent snapshots don't start the same work twice
+    // Don't hold up the widget: it shows the file icon now and swaps in the thumbnail once it's ready.
+    makeThumb(d).then(url => {
+      thumbs.set(d.id, url);
+      if (thumbs.size > 30) thumbs.delete(thumbs.keys().next().value);
+      if (url) throttledBroadcast();
+    });
+  }
+  return thumbs.get(d.id);
+}
+
 async function snapshot() {
   const recent = await chrome.downloads.search({ orderBy: ['-startTime'], limit: 3 });
   const items = await Promise.all(recent.map(async d => {
     let icon = '';
     try { icon = await chrome.downloads.getFileIcon(d.id, { size: 32 }); } catch (_) {}
+    const thumb = await thumbFor(d);
     return {
       id: d.id,
       name: (d.filename || d.url || '').split(/[\\/]/).pop(),
@@ -132,7 +192,10 @@ async function snapshot() {
       bytesReceived: d.bytesReceived,
       totalBytes: d.totalBytes,
       fileSize: d.fileSize,
-      icon
+      path: d.filename,
+      mime: d.mime,
+      icon,
+      thumb
     };
   }));
   // remaining: -1 = stay (download running), 0 = hidden, >0 = ms left before fading out
@@ -166,7 +229,7 @@ chrome.downloads.onChanged.addListener(delta => {
   throttledBroadcast();
 });
 
-chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === 'get-downloads') {
     snapshot().then(sendResponse);
     return true;
@@ -174,7 +237,33 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.type === 'open-file') chrome.downloads.open(msg.id);
   if (msg.type === 'show-file') chrome.downloads.show(msg.id);
   if (msg.type === 'open-folder') chrome.downloads.showDefaultFolder();
+  if (msg.type === 'drop-file') {
+    dropFile(sender.tab?.id, msg.id, msg.x, msg.y).then(() => sendResponse({}), e => sendResponse({ error: String(e.message || e) }));
+    return true;
+  }
 });
+
+// Drops a downloaded file onto a page at (x, y) by replaying a drag through the DevTools protocol: a native
+// drag can't hand a web page a real file. Chrome shows its "started debugging" banner while attached.
+async function dropFile(tabId, downloadId, x, y) {
+  if (tabId == null || !Number.isFinite(x) || !Number.isFinite(y)) throw new Error('Nothing to drop onto');
+  const [d] = await chrome.downloads.search({ id: downloadId });
+  if (!d?.filename || d.state !== 'complete' || d.exists === false) throw new Error('File not found');
+  const target = { tabId };
+  try {
+    await chrome.debugger.attach(target, '1.3');
+  } catch (e) {
+    throw new Error(/already attached/i.test(e.message) ? 'Close DevTools on this tab to drop files' : "Can't drop files on this page");
+  }
+  try {
+    const data = { items: [], files: [d.filename], dragOperationsMask: 1 };
+    const cmd = (method, params) => chrome.debugger.sendCommand(target, method, params);
+    await cmd('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y });
+    for (const type of ['dragEnter', 'dragOver', 'drop']) await cmd('Input.dispatchDragEvent', { type, x, y, data });
+  } finally {
+    await chrome.debugger.detach(target).catch(() => {});
+  }
+}
 
 // --- media -------------------------------------------------------------
 

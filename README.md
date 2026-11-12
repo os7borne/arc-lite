@@ -14,7 +14,7 @@ A Manifest V3 Chromium extension that brings a few of Arc's best touches to any 
 
 - **Action bar**: a small row of buttons pinned to the bottom-left of every page. Each button lives in its own file under `buttons/`.
   - **Media**: a mini player for each playing `<video>`/`<audio>` source (play/pause, seek, mute, picture-in-picture, and next/previous on YouTube, YouTube Music and Spotify). It works across frames.
-  - **Downloads**: shows the latest download as a chip, with the three most recent downloads on hover. It can hide the browser's native downloads UI.
+  - **Downloads**: shows the latest download as a chip, with the three most recent downloads on hover. It can hide the browser's native downloads UI. Drag a finished download onto a page to drop it into an upload area (Esc cancels; can be turned off in settings). Chrome shows its "started debugging this browser" banner for a moment while the file is dropped.
   - **Copy URL**: copies the current tab's URL (`Cmd+Shift+C` on Mac, `Ctrl+Shift+C` elsewhere) and shows a toast.
 - **Command bar** (`Cmd/Ctrl+Shift+K`, plus a configurable in-page shortcut, default `Cmd/Ctrl+T`): one box that searches open tabs, actions, history, recently closed tabs and the web. It renders as an overlay iframe, or as a popup window on pages where scripts can't run (`chrome://`, the Web Store, PDFs).
 - **Start page** (replaces the new tab page): clock, greeting, search box, top sites, a small to-do list, and a background that is a gradient, a solid colour, your own photo, or a daily photo from Bing, Wikipedia, NASA or Picsum.
@@ -54,7 +54,7 @@ Requires Chrome 116 or newer. Keyboard shortcuts can be changed at `chrome://ext
 
 ## Permissions
 
-`<all_urls>` is needed for the action bar, media agent and command bar content scripts. Other permissions: `tabs`, `tabGroups`, `sessions`, `history`, `topSites`, `search` and `favicon` (command bar, start page, session restore), `downloads*` (downloads button), `offscreen`, `scripting` and `activeTab` (clipboard), `storage` and `unlimitedStorage` (settings, photos, session snapshot), and `alarms` (daily photo).
+`<all_urls>` is needed for the action bar, media agent and command bar content scripts. Other permissions: `tabs`, `tabGroups`, `sessions`, `history`, `topSites`, `search` and `favicon` (command bar, start page, session restore), `downloads*` (downloads button), `debugger` (only to drop a dragged download onto a page; it is attached for that moment and then released), `offscreen`, `scripting` and `activeTab` (clipboard), `storage` and `unlimitedStorage` (settings, photos, session snapshot), and `alarms` (daily photo).
 
 Network requests are limited to the daily-photo sources you pick (Bing, Wikimedia, NASA, Picsum), and are sent without credentials. Nothing is sent anywhere else.
 

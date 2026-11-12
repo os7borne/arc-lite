@@ -14,6 +14,9 @@
     .row { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 8px; cursor: pointer; }
     .row:hover { background: rgba(255,255,255,.1); }
     .row img, .chip img { width: 24px; height: 24px; flex: none; }
+    .row img.thumb, .chip img.thumb { width: 36px; height: 36px; object-fit: cover; border-radius: 6px;
+                                      box-shadow: 0 0 0 1px rgba(255,255,255,.12); }
+    .ico:has(img.thumb) { width: 36px; height: 36px; }
     .txt { min-width: 0; flex: 1; }
     .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .nm.gone { text-decoration: line-through; opacity: .6; }
@@ -44,6 +47,12 @@
     .st.live::after { content: ''; display: inline-block; width: 4px; height: 4px; margin-left: 6px;
                       border-radius: 50%; background: #0a84ff; animation: dl-pulse 1s ease-in-out infinite; }
     @keyframes dl-pulse { 50% { opacity: .25; } }
+    .row, .chip { user-select: none; }
+    .ghost { position: fixed; left: 0; top: 0; display: flex; align-items: center; gap: 8px; max-width: 240px;
+             padding: 6px 10px; border-radius: 10px; background: rgba(28,28,30,.96); color: #f2f2f7;
+             font: 13px -apple-system, system-ui, sans-serif; white-space: nowrap; overflow: hidden;
+             text-overflow: ellipsis; box-shadow: 0 6px 24px rgba(0,0,0,.35); pointer-events: none; opacity: .92; }
+    .ghost img { width: 20px; height: 20px; }
     .folder { display: block; width: 100%; margin-top: 4px; padding: 7px; border: 0; border-radius: 8px;
               background: rgba(255,255,255,.12); color: inherit; font: inherit; cursor: pointer; }
     .folder:hover { background: rgba(255,255,255,.2); }`;
@@ -67,12 +76,76 @@
   let running = false;
   let rows;
   let chipId;
+  let dragging = false;
+  let deferred; // a download update that arrived mid-drag; re-rendering would destroy the dragged element
+
+  // Dragging a finished download onto the page. A native drag can't give a page a real file, so the row follows
+  // the pointer itself and the background script drops the file at the release point (DevTools protocol).
+  const draggable = d => d.state === 'complete' && d.exists !== false && !!d.path;
+  let suppressClick = false;
+
+  function makeGhost(d) {
+    const g = document.createElement('div');
+    g.className = 'ghost';
+    const img = document.createElement('img');
+    if (d.icon) img.src = d.icon;
+    g.append(img, d.name || 'Download');
+    ctx.root.append(g);
+    return g;
+  }
+
+  function attachDrag(el, d) {
+    if (!draggable(d)) return;
+    el.ondragstart = e => e.preventDefault();
+    el.onpointerdown = e => {
+      if (e.button !== 0 || e.target.closest('.show') || Settings.current.downloads.dragToPage === false) return;
+      const sx = e.clientX, sy = e.clientY;
+      let ghost;
+      // Listen on the window, not the row: the row can be re-rendered or hidden mid-drag, which would drop the
+      // pointer capture and leave a release unseen. (The chip shares this handler, so use currentTarget.)
+      try { e.currentTarget.setPointerCapture(e.pointerId); } catch (_) {}
+      const move = ev => {
+        if (!ev.buttons) return end(ev); // released outside the window: end without dropping
+        if (!ghost) {
+          if (Math.hypot(ev.clientX - sx, ev.clientY - sy) < 6) return;
+          dragging = true;
+          ghost = makeGhost(d);
+        }
+        ghost.style.transform = `translate(${ev.clientX + 12}px, ${ev.clientY + 12}px)`;
+      };
+      const cancel = ev => ev.key === 'Escape' && end(ev);
+      const end = ev => {
+        removeEventListener('pointermove', move, true);
+        removeEventListener('pointerup', end, true);
+        removeEventListener('pointercancel', end, true);
+        removeEventListener('blur', end);
+        removeEventListener('keydown', cancel, true);
+        if (!ghost) return;
+        ghost.remove();
+        dragging = false;
+        suppressClick = true; // the release would otherwise count as a click and open the file
+        setTimeout(() => { suppressClick = false; });
+        if (deferred) { const m = deferred; deferred = null; apply(m); }
+        // Releasing over the bar itself (or pressing Escape) cancels instead of dropping.
+        if (ev.type === 'pointerup' && !ctx.root.elementFromPoint(ev.clientX, ev.clientY)?.closest('.bar')) {
+          ctx.send({ type: 'drop-file', id: d.id, x: ev.clientX, y: ev.clientY })
+            .then(r => ctx.toast(r?.error || 'Dropped'));
+        }
+      };
+      addEventListener('pointermove', move, true);
+      addEventListener('pointerup', end, true);
+      addEventListener('pointercancel', end, true);
+      addEventListener('blur', end);
+      addEventListener('keydown', cancel, true);
+    };
+  }
 
   function row(d) {
     const el = document.createElement('div');
     el.className = 'row';
     const img = document.createElement('img');
-    if (d.icon) img.src = d.icon;
+    if (d.thumb && Settings.current.downloads.thumbnails !== false) { img.src = d.thumb; img.className = 'thumb'; }
+    else if (d.icon) img.src = d.icon;
     const active = d.state === 'in_progress' && !d.paused;
     let lead = img;
     if (active) {
@@ -107,7 +180,9 @@
       show.onclick = e => { e.stopPropagation(); ctx.send({ type: 'show-file', id: d.id }); };
       el.append(show);
     }
-    el.onclick = () => d.state === 'complete' && d.exists !== false &&
+    attachDrag(el, d);
+    if (draggable(d)) el.title = 'Drag onto the page to drop the file';
+    el.onclick = () => !suppressClick && d.state === 'complete' && d.exists !== false &&
       ctx.send({ type: 'open-file', id: d.id });
     return el;
   }
@@ -133,18 +208,22 @@
     }
     chipId = d.id;
     ctx.chip.onclick = latest.onclick;
+    ctx.chip.ondragstart = latest.ondragstart;
+    ctx.chip.onpointerdown = latest.onpointerdown;
     rows.replaceChildren(...items.map(row));
   }
 
   function scheduleHide(ms) {
     clearTimeout(hideTimer);
     hideTimer = setTimeout(() => {
-      if (ctx.isHovered()) return scheduleHide(1500);
+      if (dragging || ctx.isHovered()) return scheduleHide(1500);
       ctx.setActive(false);
     }, ms);
   }
 
-  function apply({ items: next, remaining }) {
+  function apply(msg) {
+    if (dragging) { deferred = msg; return; }
+    const { items: next, remaining } = msg;
     items = next;
     running = remaining < 0;
     render();
