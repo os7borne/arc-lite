@@ -15,8 +15,13 @@
     'open.spotify.com': {
       next: '[data-testid="control-button-skip-forward"]',
       prev: '[data-testid="control-button-skip-back"]'
-    }
+    },
+    'soundcloud.com': { next: '.playControls__next', prev: '.playControls__prev' },
+    'www.deezer.com': { next: '[data-testid="next_track_button"]', prev: '[data-testid="previous_track_button"]' },
+    'listen.tidal.com': { next: '[data-test="next"]', prev: '[data-test="previous"]' }
   };
+  // Sites that are about audio: picture-in-picture gets a small player of our own instead of floating a video.
+  const AUDIO_HOSTS = /(^|\.)(spotify|soundcloud|deezer|tidal|pandora|bandcamp|mixcloud|audiomack|napster|qobuz)\.com$|^music\.(youtube|apple|amazon)\./i;
 
   const EVENTS = ['play', 'playing', 'pause', 'ended', 'seeked', 'volumechange', 'loadedmetadata',
     'durationchange', 'emptied', 'enterpictureinpicture', 'leavepictureinpicture'];
@@ -31,6 +36,21 @@
   const alive = () => { try { return !!chrome.runtime?.id; } catch (_) { return false; } };
   const send = msg => alive() && chrome.runtime.sendMessage(msg).catch(() => {});
 
+  // The site's Media Session handlers (play, pause, next and previous track, seek) live in the page's own world.
+  // pip-shim.js keeps them and tells us which exist; we ask it to call them. Most music sites want to be controlled
+  // this way, and a few misbehave if you pause their audio element behind their back.
+  const siteActions = new Set();
+  document.addEventListener('arc-media:actions', e => {
+    try { siteActions.clear(); JSON.parse(e.detail).forEach(a => siteActions.add(a)); } catch (_) {}
+  });
+  const querySite = () => document.dispatchEvent(new CustomEvent('arc-media:query'));
+  const callSite = (action, details = {}) => {
+    if (!siteActions.has(action)) return false;
+    document.dispatchEvent(new CustomEvent('arc-media:call', { detail: JSON.stringify({ action, details }) }));
+    return true;
+  };
+  querySite();
+
   // Muted looping/autoplaying clips (hero videos, GIF replacements) aren't "media" to control.
   const ignorable = el => (!el.currentSrc && !el.srcObject) || (el.muted && !userMuted.has(el) && (el.loop || el.autoplay));
 
@@ -42,10 +62,15 @@
     return els.includes(active) ? active : null;
   }
 
+  // Audio you can't float as a video: an <audio> element, a music site, or a <video> with no picture.
+  const audioOnly = el => el.localName === 'audio' || AUDIO_HOSTS.test(location.hostname) || (el.readyState >= 1 && !el.videoWidth);
+
   const SVG = 'http://www.w3.org/2000/svg';
   const ICONS = {
     play: ['M6 4l14 8-14 8z', true],
     pause: ['M6 4h4v16H6zM14 4h4v16h-4z', true],
+    prev: ['M19 20 9 12l10-8zM5 4v16', true],
+    next: ['M5 4l10 8-10 8zM19 4v16', true],
     minimise: ['M5 12h14'],
     close: ['M6 6l12 12M18 6L6 18']
   };
@@ -219,6 +244,7 @@
     try {
       if (docPip?.window) return docPip.window.close(); // minimise: the video returns to the page
       if (document.pictureInPictureElement) return await document.exitPictureInPicture();
+      if (audioOnly(el)) return docPip ? await openAudioPip(el) : undefined;
       if (el.localName !== 'video') return;
       if (docPip && !el.disablePictureInPicture) return await openDocPip(el);
       if (!document.pictureInPictureEnabled) return;
@@ -245,6 +271,133 @@
   // For the action bar in this same page: calling this inside its click keeps the user gesture intact.
   globalThis.__mediaPip = () => { const el = pick(); if (el) togglePip(el); };
 
+  function togglePlay(el) {
+    const paused = el.paused;
+    if (callSite(paused ? 'play' : 'pause')) return;
+    if (paused) el.play().catch(() => {}); else el.pause();
+  }
+  function seekTo(el, t) {
+    t = Math.max(0, Math.min(el.duration || Infinity, t));
+    if (!callSite('seekto', { seekTime: t })) el.currentTime = t;
+  }
+  function skipTrack(which) {
+    if (callSite(which === 'next' ? 'nexttrack' : 'previoustrack')) return;
+    skipButton(which)?.click();
+  }
+  const canSkip = which => !!skipButton(which) || siteActions.has(which === 'next' ? 'nexttrack' : 'previoustrack');
+
+  // Picture-in-picture for audio (Spotify and the like): there's no video to float, so this is a small player of our
+  // own in the same kind of window: the artwork, title and artist, a seek bar and the controls, kept in step with the page.
+  async function openAudioPip(el) {
+    const win = await docPip.requestWindow({ width: 380, height: 172 });
+    const doc = win.document;
+    const style = doc.createElement('style');
+    style.textContent = `
+      html, body { margin: 0; height: 100%; background: #1c1c1e; color: #f2f2f7; overflow: hidden;
+                   font: 13px -apple-system, system-ui, sans-serif; }
+      .wrap { position: relative; display: flex; align-items: center; gap: 12px; height: 100%; box-sizing: border-box; padding: 10px 12px; }
+      .art { flex: none; width: 76px; height: 76px; border-radius: 10px; object-fit: cover; background: #2c2c2e; }
+      .col { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+      .t { font-size: 14px; font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: 24px; }
+      .a { margin-top: -4px; font-size: 12px; color: #a1a1a8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .seek { display: flex; align-items: center; gap: 6px; font-size: 11px; color: #a1a1a8; font-variant-numeric: tabular-nums; }
+      .seek.off { visibility: hidden; }
+      input[type=range] { flex: 1; height: 14px; margin: 0; cursor: pointer; -webkit-appearance: none; appearance: none; background: transparent; }
+      input[type=range]::-webkit-slider-runnable-track { height: 4px; border-radius: 2px;
+        background: linear-gradient(to right, #f2f2f7 var(--p, 0%), rgba(255,255,255,.2) var(--p, 0%)); }
+      input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 10px; height: 10px; margin-top: -3px; border-radius: 50%; background: #fff; }
+      .ctl { display: flex; align-items: center; gap: 6px; }
+      button { display: flex; align-items: center; justify-content: center; width: 30px; height: 30px; padding: 0; border: 0;
+               border-radius: 50%; background: transparent; color: #f2f2f7; cursor: pointer; }
+      button:hover { background: rgba(255,255,255,.14); }
+      button.main { width: 36px; height: 36px; background: #f2f2f7; color: #1c1c1e; }
+      button.main:hover { background: #fff; }
+      .x { position: absolute; top: 4px; right: 4px; width: 24px; height: 24px; opacity: .6; }
+      .x:hover { opacity: 1; }`;
+    doc.head.append(style);
+
+    const make = (tag, cls) => { const e = doc.createElement(tag); if (cls) e.className = cls; return e; };
+    const btn = (name, title, onclick, size = 16) => {
+      const b = make('button');
+      b.title = title;
+      b.append(icon(doc, name, size));
+      b.onclick = onclick;
+      return b;
+    };
+    const art = make('img', 'art');
+    art.alt = '';
+    const title = make('div', 't');
+    const artist = make('div', 'a');
+    const cur = make('span');
+    const dur = make('span');
+    const range = Object.assign(make('input'), { type: 'range', min: 0, max: 1000, value: 0 });
+    const seek = make('div', 'seek');
+    seek.append(cur, range, dur);
+    const prev = btn('prev', 'Previous', () => skipTrack('prev'), 15);
+    const play = btn('play', 'Play', () => { togglePlay(el); setTimeout(paint, 150); }, 16);
+    play.className = 'main';
+    const next = btn('next', 'Next', () => skipTrack('next'), 15);
+    const ctl = make('div', 'ctl');
+    ctl.append(prev, play, next);
+    const col = make('div', 'col');
+    col.append(title, artist, seek, ctl);
+    const close = btn('close', 'Close', () => win.close(), 12);
+    close.className = 'x';
+    const wrap = make('div', 'wrap');
+    wrap.append(art, col, close);
+    doc.body.append(wrap);
+
+    const fmt = t => {
+      t = Math.max(0, Math.floor(t || 0));
+      return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`;
+    };
+    let scrubbing = false;
+    let lastArt = '';
+    function paint() {
+      const md = navigator.mediaSession?.metadata;
+      const name = md?.title || document.title;
+      title.textContent = name;
+      doc.title = name;
+      artist.textContent = md?.artist || '';
+      artist.style.display = md?.artist ? '' : 'none';
+      const src = md?.artwork?.length ? md.artwork[md.artwork.length - 1].src : '';
+      if (src !== lastArt) { lastArt = src; if (src) art.src = src; else art.removeAttribute('src'); }
+      art.style.visibility = src ? '' : 'hidden';
+      play.replaceChildren(icon(doc, el.paused ? 'play' : 'pause', 16));
+      play.title = el.paused ? 'Play' : 'Pause';
+      prev.style.display = canSkip('prev') ? '' : 'none';
+      next.style.display = canSkip('next') ? '' : 'none';
+      const seekable = Number.isFinite(el.duration) && el.duration > 0;
+      seek.classList.toggle('off', !seekable);
+      if (seekable) {
+        cur.textContent = fmt(el.currentTime);
+        dur.textContent = fmt(el.duration);
+        if (!scrubbing) {
+          range.value = (el.currentTime / el.duration) * 1000;
+          range.style.setProperty('--p', `${range.value / 10}%`);
+        }
+      }
+    }
+    range.addEventListener('input', () => {
+      scrubbing = true;
+      range.style.setProperty('--p', `${range.value / 10}%`);
+      cur.textContent = fmt((range.value / 1000) * el.duration);
+    });
+    range.addEventListener('change', () => { seekTo(el, (range.value / 1000) * el.duration); scrubbing = false; });
+
+    // Tracks change without any media event (the site just swaps the metadata), so it also repaints on a timer.
+    const types = ['timeupdate', 'play', 'pause', 'durationchange', 'seeked', 'loadedmetadata', 'emptied'];
+    types.forEach(t => el.addEventListener(t, paint));
+    const timer = setInterval(paint, 1000);
+    win.addEventListener('pagehide', () => {
+      clearInterval(timer);
+      types.forEach(t => el.removeEventListener(t, paint));
+      soon();
+    });
+    paint();
+    soon();
+  }
+
   function skipButton(which) {
     const sel = SKIP[location.hostname]?.[which];
     const btn = sel && document.querySelector(sel);
@@ -259,6 +412,7 @@
       return;
     }
     reportedGone = false;
+    querySite();
     const md = navigator.mediaSession?.metadata;
     const art = md?.artwork?.length ? md.artwork[md.artwork.length - 1].src : el.poster || '';
     send({
@@ -271,9 +425,10 @@
         currentTime: el.currentTime,
         duration: Number.isFinite(el.duration) ? el.duration : 0,
         muted: el.muted,
-        canSkip: { next: !!skipButton('next'), prev: !!skipButton('prev') },
-        canPip: el.localName === 'video' && (!!docPip || document.pictureInPictureEnabled) && !el.disablePictureInPicture,
-        pip: document.pictureInPictureElement === el || el.ownerDocument !== document
+        canSkip: { next: canSkip('next'), prev: canSkip('prev') },
+        // Audio floats in a player of our own, which needs document picture-in-picture (top frame only).
+        canPip: audioOnly(el) ? !!docPip : el.localName === 'video' && (!!docPip || document.pictureInPictureEnabled) && !el.disablePictureInPicture,
+        pip: document.pictureInPictureElement === el || el.ownerDocument !== document || (audioOnly(el) && !!docPip?.window)
       }
     });
   }
@@ -309,7 +464,7 @@
       const el = pick();
       switch (msg.action) {
         case 'toggle':
-          if (el) el.paused ? el.play().catch(() => {}) : el.pause();
+          if (el) togglePlay(el);
           break;
         case 'pip':
           if (el) togglePip(el);
@@ -318,11 +473,11 @@
           if (el) { el.muted = !el.muted; userMuted.add(el); }
           break;
         case 'seek':
-          if (el) el.currentTime = Math.max(0, Math.min(el.duration || Infinity, el.currentTime + msg.delta));
+          if (el) seekTo(el, el.currentTime + msg.delta);
           break;
         case 'next':
         case 'prev':
-          skipButton(msg.action)?.click();
+          skipTrack(msg.action);
           break;
       }
       setTimeout(report, 200);
