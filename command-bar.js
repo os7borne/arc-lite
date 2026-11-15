@@ -17,11 +17,12 @@
     previousFocus?.focus?.({ preventScroll: true });
   }
 
-  function open() {
+  // `query` (optional) is typed into the bar when it opens, e.g. "snooze ".
+  function open(query) {
     if (frame) return close();
     previousFocus = document.activeElement;
     frame = document.createElement('iframe');
-    frame.src = chrome.runtime.getURL('commandbar.html');
+    frame.src = chrome.runtime.getURL('commandbar.html') + (query ? `?q=${encodeURIComponent(query)}` : '');
     frame.title = 'Command bar';
     frame.allow = 'clipboard-read; clipboard-write';
     frame.style.cssText = 'all:initial;position:fixed;inset:0;width:100%;height:100%;border:0;z-index:2147483647;background:transparent;';
@@ -37,12 +38,33 @@
   if (window.top === window && alive()) {
     chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       if (msg.type !== 'toggle-command-bar') return;
-      open();
+      open(msg.query);
       sendResponse(true);
     });
   }
 
   globalThis.Settings?.load().catch(() => {});
+
+  // Cmd/Ctrl+Z right after closing a tab reopens it. The background script decides whether a tab was closed
+  // recently enough; here we only step aside for text fields and for pages that handle undo themselves.
+  const editable = el => !!el && (el.isContentEditable || /^(input|textarea|select)$/i.test(el.tagName));
+  window.addEventListener('keydown', e => {
+    // Which key: Option+Z by default, since browsers and macOS leave it alone. On a Mac it types "Ω", so the key's
+    // letter isn't "z": match the position as well as the letter (so other layouts work too).
+    const isZ = e.code === 'KeyZ' || (e.key || '').toLowerCase() === 'z';
+    const cmd = isMac ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey;
+    const option = e.altKey && !e.metaKey && !e.ctrlKey && !e.shiftKey;
+    const shifted = cmd && !e.altKey && e.shiftKey;
+    const plain = cmd && !e.altKey && !e.shiftKey;
+    const mode = Settings.current.tabs?.undoCloseKeys || 'option';
+    const hit = (mode === 'option' && option) || (mode === 'shift' && shifted) || (mode === 'plain' && plain) ||
+                (mode === 'all' && (option || shifted || plain));
+    if (!alive() || e.defaultPrevented || e.repeat || !isZ || !hit) return;
+    if (!Settings.current.tabs?.undoClose || editable(e.composedPath?.()[0] || e.target)) return;
+    chrome.runtime.sendMessage({ type: 'undo-close-tab' })
+      .then(r => { if (r?.restored) globalThis.__actionBar?.toast('Reopened closed tab'); })
+      .catch(() => {});
+  });
   window.addEventListener('keydown', e => {
     if (!alive()) return;
     const bar = Settings.current.commandBar;

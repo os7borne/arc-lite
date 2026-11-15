@@ -9,10 +9,21 @@
     commandBar: { enabled: true, shortcut: { code: 'KeyT', mod: true, shift: false, alt: false }, openIn: 'new' },
     toolbar: { action: 'settings' }, // what clicking the extension icon does: settings | start | downloads
     bar: { enabled: true },
-    buttons: { downloads: true, copyUrl: true, media: true },
+    buttons: { downloads: true, copyUrl: true, media: true, focus: true, snooze: true, commandBar: true },
     media: { autoPip: true, announceSeconds: 5, hideOnSites: [], ignoreSites: [] },
     downloads: { hideNativeUi: true, showSeconds: 6, dragToPage: true, thumbnails: true },
+    focus: {
+      focusMin: 25, breakMin: 5, longBreakMin: 15, longEvery: 4, // a pomodoro: a longer break after every 4th session
+      autoNext: false,       // roll straight into the next phase; off = wait for you to start it
+      breakUnblocks: true,   // sites open again during a break
+      friction: true,        // pausing, skipping or stopping a focus session takes a 10 second wait
+      notify: true,
+      blocklist: ['x.com', 'twitter.com', 'facebook.com', 'instagram.com', 'threads.net', 'reddit.com', 'tiktok.com',
+                  'snapchat.com', 'youtube.com', 'twitch.tv', 'netflix.com', 'linkedin.com'],
+      allowlist: [] // exceptions: "youtube.com/watch" lets just that path through
+    },
     copyUrl: { shortcut: true },
+    tabs: { undoClose: true, undoCloseKeys: 'option' }, // reopen a tab closed in the last few seconds; keys: option (Option+Z) | shift (Cmd+Shift+Z) | plain (Cmd+Z) | all
     session: { restoreOnStartup: true },
     newtab: {
       clock: true, clock24: false, greeting: true, name: '', search: true, focusSearch: true, todo: true, todoSlots: 4,

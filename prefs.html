@@ -12,10 +12,12 @@
   <a href="#general" class="on">General</a>
   <a href="#start">Start page</a>
   <a href="#commandbar">Command bar</a>
+  <a href="#focus">Focus mode</a>
   <a href="#bar">Action bar</a>
   <a href="#media">Media player</a>
   <a href="#downloads">Downloads</a>
   <a href="#copyurl">Copy URL</a>
+  <a href="#tabs">Tabs</a>
   <a href="#session">Session restore</a>
   <a href="#reset">Reset</a>
 </nav>
@@ -116,12 +118,43 @@
     <p class="note">Hold Shift while pressing Enter to use the other choice. Type &gt; first to see only actions. On browser pages such as chrome://settings, where a page can't be drawn on, it opens as a small window; set a browser shortcut under Copy URL → Browser shortcuts for that case. The default shortcut is ⌘T, which replaces opening a new tab on web pages; on browser pages and anywhere the bar can't run, ⌘T still opens a normal new tab.</p>
   </section>
 
+  <section id="focus">
+    <h2>Focus mode</h2>
+    <div class="card">
+      <div class="row"><span>Focus session <small>minutes</small></span>
+        <div class="inline"><input type="range" min="5" max="90" step="5" data-key="focus.focusMin"><output></output></div></div>
+      <div class="row"><span>Break <small>minutes</small></span>
+        <div class="inline"><input type="range" min="1" max="30" data-key="focus.breakMin"><output></output></div></div>
+      <div class="row"><span>Long break <small>minutes, after every few sessions</small></span>
+        <div class="inline"><input type="range" min="5" max="60" step="5" data-key="focus.longBreakMin"><output></output></div></div>
+      <div class="row"><span>Long break after <small>sessions</small></span>
+        <div class="inline"><input type="range" min="2" max="8" data-key="focus.longEvery"><output></output></div></div>
+      <label class="row"><span>Start the next phase automatically <small>focus, break, focus… until you stop</small></span>
+        <input type="checkbox" class="sw" data-key="focus.autoNext"></label>
+      <label class="row"><span>Unblock sites during breaks</span>
+        <input type="checkbox" class="sw" data-key="focus.breakUnblocks"></label>
+      <label class="row"><span>Make quitting a focus session slow <small>pausing, skipping or stopping takes a 10 second wait</small></span>
+        <input type="checkbox" class="sw" data-key="focus.friction"></label>
+      <label class="row"><span>Notify when a phase ends</span>
+        <input type="checkbox" class="sw" data-key="focus.notify"></label>
+    </div>
+    <h3>Blocked sites</h3>
+    <div class="card"><div class="list" data-key="focus.blocklist" data-lock="focus"></div></div>
+    <h3>Always allowed <small>a site, or a path such as youtube.com/watch</small></h3>
+    <div class="card"><div class="list" data-key="focus.allowlist" data-lock="focus" data-paths></div></div>
+    <p class="note" id="focusLock" hidden>The lists are locked while a focus session is running.</p>
+    <p class="note">Subdomains are included: blocking reddit.com also blocks old.reddit.com. Tabs already open on a blocked site are replaced with a focus page, and come back to the site when the session ends.</p>
+  </section>
+
   <section id="bar">
     <h2>Action bar</h2>
     <div class="card">
       <label class="row"><span>Show the action bar <small>the corner bar on web pages</small></span>
         <input type="checkbox" class="sw" data-key="bar.enabled"></label>
       <label class="row"><span>Media player button</span><input type="checkbox" class="sw" data-key="buttons.media"></label>
+      <label class="row"><span>Focus button</span><input type="checkbox" class="sw" data-key="buttons.focus"></label>
+      <label class="row"><span>Snooze button</span><input type="checkbox" class="sw" data-key="buttons.snooze"></label>
+      <label class="row"><span>Command bar button</span><input type="checkbox" class="sw" data-key="buttons.commandBar"></label>
       <label class="row"><span>Downloads button</span><input type="checkbox" class="sw" data-key="buttons.downloads"></label>
       <label class="row"><span>Copy URL button</span><input type="checkbox" class="sw" data-key="buttons.copyUrl"></label>
     </div>
@@ -167,6 +200,21 @@
         <input type="checkbox" class="sw" data-key="copyUrl.shortcut"></label>
       <div class="row"><span>Browser shortcuts <small>needed for pages the bar can't run on</small></span>
         <button class="btn" id="shortcuts">Open shortcut settings</button></div>
+    </div>
+  </section>
+
+  <section id="tabs">
+    <h2>Tabs</h2>
+    <div class="card">
+      <label class="row"><span>Reopen a closed tab with a key <small>only within 10 seconds of closing one, and never in text fields or on pages that handle the key themselves</small></span>
+        <input type="checkbox" class="sw" data-key="tabs.undoClose"></label>
+      <label class="row"><span>Which key <small>⌥Z isn't used by browsers or macOS; ⌘Z often is</small></span>
+        <select data-key="tabs.undoCloseKeys">
+          <option value="option">⌥Z (Alt+Z)</option>
+          <option value="shift">⌘⇧Z</option>
+          <option value="plain">⌘Z</option>
+          <option value="all">Any of these</option>
+        </select></label>
     </div>
   </section>
 

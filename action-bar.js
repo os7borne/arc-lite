@@ -1,4 +1,20 @@
-// Action bar core: a row of buttons pinned bottom-left. Each file in buttons/ registers its own button.
+// Action bar core. At rest it is a small capsule in the corner with a live cue for everything running. Hovering it
+// opens one card: a home page that sums up everything active (a section per thing), and a detail page for each
+// thing, which you move between with the buttons along the bottom (or a sideways swipe). With no click for a few
+// seconds, the card slides back to the home page.
+//
+// Each file in buttons/ registers a card (or a plain action) and fills the elements it is given:
+//   register({ id, title, icon, order, side, kind, color, home, onClick, onShow, css, setup(ctx), onMessage(msg) })
+//   ctx: { home, detail, root, send, toast,
+//          setAvailable(on)      this card has something to show: its button and detail page exist
+//          setHomeVisible(on)    show its section on the home page (default: while available)
+//          setLive(on)           something is going on: its cue shows on the capsule
+//          setIndicator(node)    what the capsule shows for it while live
+//          setTab(node)          what its button on the pager shows
+//          setEnabled(on)        switched off for this site
+//          peek(ms)              open the card on its own for a moment, to announce something (negative: until 0)
+//          go()                  slide to this card's detail page
+//          busy(on)              keep the card from sliding home while you're in the middle of something }
 (() => {
   if (window.top !== window) return;
   const previous = globalThis.__actionBar;
@@ -7,64 +23,90 @@
     previous.destroy(); // orphan from before an extension reload
   }
 
+  const CARD_W = 340;
+  const RETURN_MS = 5000;   // with no click for this long, slide back to the home page
+  const CLOSE_GRACE_MS = 250;
+
   const host = document.createElement('div');
   host.style.cssText = 'all:initial;position:fixed;left:16px;bottom:16px;z-index:2147483647;';
   const root = host.attachShadow({ mode: 'closed' });
   root.innerHTML = `
     <style>
       :host { all: initial; }
-      @keyframes pop-in { from { opacity: 0; transform: translateY(6px); } }
+      @keyframes pop-in { from { opacity: 0; transform: translateY(6px) scale(.97); } }
       @media (prefers-reduced-motion: reduce) {
         * { transition-duration: .01ms !important; animation-duration: .01ms !important; }
       }
-      .bar { --ease: cubic-bezier(.2,.8,.2,1); position: relative;
-             font: 13px -apple-system, system-ui, sans-serif; color: #f2f2f7;
-             display: flex; align-items: flex-end; gap: 6px; }
-      .slot { position: relative; display: none; flex-direction: column; align-items: flex-start; }
-      .slot.on, .slot.live, .bar:hover .slot { display: flex; animation: pop-in .2s var(--ease); }
-      .handle { display: none; align-items: center; justify-content: center; width: 32px; height: 32px;
-                border-radius: 10px; background: rgba(28,28,30,.7); color: #f2f2f7; opacity: .35;
-                cursor: pointer; transition: opacity .15s; }
-      .bar.idle .handle { display: flex; }
-      .bar:hover .handle { display: none; }
-      .btn { display: flex; align-items: center; justify-content: center; width: 32px; height: 32px;
-             border-radius: 10px; background: rgba(28,28,30,.7); color: #f2f2f7; opacity: .35;
-             cursor: pointer; transition: opacity .15s; }
-      .slot:hover .btn { opacity: 1; }
-      .slot.on .btn { display: none; }
-      .chip { display: none; align-items: center; gap: 10px; width: 280px; padding: 8px 12px; cursor: pointer;
-              background: rgba(28,28,30,.96); border-radius: 12px; box-shadow: 0 6px 24px rgba(0,0,0,.35); }
-      .slot.on .chip { display: flex; animation: pop-in .25s var(--ease); }
-      /* Hides after a short grace period instead of instantly, so a diagonal move from the (narrow) button to
-         the (wide) popover doesn't clip the slot's corner and close it. It stays hoverable until it is hidden. */
-      .pop { position: absolute; bottom: 100%; left: 0; padding-bottom: 6px; visibility: hidden; opacity: 0;
-             transition: opacity .15s .3s, visibility 0s .45s; }
-      .slot:hover .pop:not(:empty) { visibility: visible; opacity: 1; transition: none;
-                                     animation: pop-in .18s var(--ease); }
-      /* While a chip is open, a lifting slot (media) moves above the bar instead of pushing the chip aside.
-         The padding bridges the gap so the bar stays hovered. It hides while another slot's popover is open. */
-      .slot.lift { transition: opacity .15s; }
-      .bar.stack .slot.lift { position: absolute; left: 0; bottom: 100%; padding-bottom: 6px; }
-      .bar.stack:has(.slot:not(.lift):hover .pop:not(:empty)) .slot.lift { opacity: 0; pointer-events: none; }
-      .toast { position: fixed; top: 16px; left: 50%; transform: translateX(-50%); padding: 8px 14px;
-               border-radius: 10px; background: #1c1c1e; color: #fff; box-shadow: 0 4px 16px rgba(0,0,0,.3);
-               opacity: 0; pointer-events: none; transition: opacity .3s; }
+      .bar { --ease: cubic-bezier(.2,.8,.2,1); position: relative; color: #f2f2f7; font: 13px -apple-system, system-ui, sans-serif; }
+
+      .handle { display: flex; align-items: center; gap: 8px; min-width: 32px; height: 32px; padding: 0 7px; box-sizing: border-box;
+                border-radius: 10px; background: rgba(28,28,30,.7); color: #f2f2f7; opacity: .35; cursor: pointer;
+                transition: opacity .4s; }
+      .handle.live { opacity: .95; }
+      .handle svg { flex: none; }
+      .hind { display: flex; align-items: center; gap: 10px; }
+      .bar.open .handle, .bar.peek .handle { display: none; }
+
+      .panel { display: none; width: ${CARD_W}px; border-radius: 14px; background: rgba(28,28,30,.96); overflow: hidden;
+               box-shadow: 0 8px 28px rgba(0,0,0,.28); transform-origin: bottom left; }
+      .bar.open .panel, .bar.peek .panel { display: block; animation: pop-in .35s var(--ease); }
+      .viewport { position: relative; overflow: hidden; transition: height .45s var(--ease); }
+      .viewport.instant { transition: none; }
+      .strip { display: flex; align-items: flex-start; transition: transform .5s var(--ease); }
+      .strip.instant { transition: none; }
+      .page { flex: none; width: ${CARD_W}px; box-sizing: border-box; overflow: hidden; }
+
+      .homepage { padding: 6px; }
+      .hs { padding: 8px 6px; border-top: 1px solid rgba(255,255,255,.08); }
+      .hs:first-child { border-top: 0; }
+      .hs.link { cursor: pointer; border-radius: 8px; }
+      .hs.link:hover { background: rgba(255,255,255,.05); }
+      .none { padding: 24px 14px; color: #a1a1a8; }
+
+      .pager { display: flex; align-items: center; gap: 4px; height: 44px; box-sizing: border-box; padding: 0 8px;
+               border-top: 1px solid rgba(255,255,255,.08); }
+      .pager .space { flex: 1; }
+      .bar.mini .pager { display: none; }
+      .tab { position: relative; display: flex; align-items: center; justify-content: center; min-width: 40px; height: 36px;
+             padding: 0 6px; box-sizing: border-box; border: 0; border-radius: 10px; background: transparent; color: #f2f2f7;
+             cursor: pointer; transition: background .2s; }
+      .tab:hover { background: rgba(255,255,255,.07); }
+      .tab.on { background: rgba(255,255,255,.1); }
+      .tab.on::after { content: ''; position: absolute; left: 12px; right: 12px; bottom: 2px; height: 2px; border-radius: 1px;
+                       background: var(--tc, #f2f2f7); }
+      .tab.act { min-width: 36px; color: #d1d1d6; }
+      .tab img { display: block; }
+
+      .toast { position: fixed; top: 16px; left: 50%; transform: translateX(-50%); padding: 8px 14px; border-radius: 10px;
+               background: #1c1c1e; color: #fff; box-shadow: 0 4px 16px rgba(0,0,0,.3); opacity: 0; pointer-events: none;
+               transition: opacity .3s; }
       .toast.on { opacity: 1; }
     </style>
     <div class="toast"></div>
-    <div class="bar idle">
+    <div class="bar">
       <div class="handle" title="Action bar">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><circle cx="7" cy="7" r="2"/><circle cx="17" cy="7" r="2"/><circle cx="7" cy="17" r="2"/><circle cx="17" cy="17" r="2"/></svg>
+        <div class="hind"></div>
+      </div>
+      <div class="panel">
+        <div class="viewport"><div class="strip"></div></div>
+        <div class="pager"></div>
       </div>
     </div>`;
 
-  const bar = root.querySelector('.bar');
-  const toastEl = root.querySelector('.toast');
+  const $ = s => root.querySelector(s);
+  const bar = $('.bar');
+  const toastEl = $('.toast');
+  const handle = $('.handle');
+  const hind = $('.hind');
+  const track = $('.strip');
+  const viewport = $('.viewport');
+  const pager = $('.pager');
   let toastTimer;
 
-  function alive() {
-    try { return !!chrome.runtime?.id; } catch (_) { return false; }
-  }
+  const alive = () => { try { return !!chrome.runtime?.id; } catch (_) { return false; } };
+  const settings = () => globalThis.Settings.current;
+  const el = (tag, cls) => Object.assign(document.createElement(tag), { className: cls || '' });
 
   // After the extension is reloaded, an orphaned copy can't reach it any more: remove the bar.
   function send(msg) {
@@ -80,116 +122,254 @@
     toastTimer = setTimeout(() => toastEl.classList.remove('on'), 1200);
   }
 
-  const slotsShown = () => [...bar.querySelectorAll('.slot')].filter(s => s.style.display !== 'none');
+  // --- the cards -------------------------------------------------------------------
 
-  // The bar collapses to the handle icon unless a button is showing something (a chip, or "live"). While a
-  // chip is open the bar stacks: lifting slots move above it.
-  function refresh() {
-    const shown = slotsShown();
-    const busy = shown.some(s => s.classList.contains('on') || s.classList.contains('live'));
-    bar.classList.toggle('idle', !busy);
-    const chip = shown.some(s => s.classList.contains('on') && !s.classList.contains('lift'));
-    // Un-stacking waits until the cursor leaves, so a pill doesn't drop out from under it.
-    if (chip || !bar.matches(':hover')) bar.classList.toggle('stack', chip);
+  const cards = [];
+  const homePage = el('div', 'page homepage');
+  const homeBtn = el('button', 'tab');
+  homeBtn.type = 'button';
+  homeBtn.title = homeBtn.ariaLabel = 'Overview';
+  homeBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="7" cy="7" r="2"/><circle cx="17" cy="7" r="2"/><circle cx="7" cy="17" r="2"/><circle cx="17" cy="17" r="2"/></svg>';
+  homeBtn.onclick = () => go('home');
+  const emptyNote = el('div', 'none');
+  emptyNote.textContent = 'Nothing running right now';
+
+  const on = c => c.siteOn && settings().buttons[c.setting] !== false;
+  const byOrder = (a, b) => a.order - b.order;
+
+  let pages = [];      // ids in track order: 'home', then a card per detail page
+  let current = 'home';
+  let returnTimer;
+
+  // Put the buttons, the detail pages and the home sections in order, from what is available right now.
+  function relayout() {
+    const left = cards.filter(c => c.kind === 'card' && c.side === 'left' && c.available && on(c)).sort(byOrder);
+    const right = cards.filter(c => c.side === 'right' && (c.kind === 'action' || c.available) && on(c)).sort(byOrder);
+    const detail = [...left, ...right.filter(c => c.kind === 'card')];
+    pages = ['home', ...detail.map(c => c.id)];
+
+    const all = cards.filter(c => c.kind === 'card' && c.hasHome && on(c) && (c.homeVisible ?? c.available)).sort(byOrder);
+    // While the bar has opened by itself to announce something (and isn't being hovered), it shows only the sections
+    // that announced; hovering it opens the whole home page.
+    const sections = bar.classList.contains('mini') ? all.filter(c => peeks.has(c.id)) : all;
+    for (const c of cards) c.homeEl.hidden = !sections.includes(c);
+    homePage.replaceChildren(...(sections.length ? sections.map(c => c.homeEl) : [emptyNote]));
+    track.replaceChildren(homePage, ...detail.map(c => c.page));
+    pager.replaceChildren(homeBtn, ...left.map(c => c.tab), Object.assign(el('span', 'space')), ...right.map(c => c.tab));
+
+    if (!pages.includes(current)) current = 'home';
+    sizer.disconnect();
+    [homePage, ...detail.map(c => c.page)].forEach(p => sizer.observe(p));
+    show(true);
+    renderHandle();
   }
 
-  // Runs a layout change, then slides every slot that moved from where it was to where it is now.
-  const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
-  const slides = new Map(); // slot -> running slide
-  function layout(change) {
-    const rect = s => s.getBoundingClientRect();
-    const before = new Map(slotsShown().map(s => [s, rect(s)]));
-    slides.forEach(a => a.cancel());
-    slides.clear();
-    change();
-    if (reduceMotion.matches) return;
-    for (const s of slotsShown()) {
-      const a = before.get(s);
-      const b = rect(s);
-      if (!a || !a.width || !b.width) continue;
-      const dx = a.left - b.left;
-      const dy = a.top - b.top;
-      if (Math.abs(dx) < 1 && Math.abs(dy) < 1) continue;
-      const anim = s.animate([{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'none' }],
-        { duration: 320, easing: 'cubic-bezier(.2,.8,.2,1)' });
-      slides.set(s, anim);
-      anim.onfinish = anim.oncancel = () => slides.get(s) === anim && slides.delete(s);
+  // The card is as tall as the page it shows, and animates between heights. It is anchored at the bottom, so the
+  // buttons stay under the pointer while it grows or shrinks upward.
+  let fitInstant = true;
+  const pageEl = id => (id === 'home' ? homePage : cards.find(c => c.id === id)?.page);
+  function fit() {
+    const h = pageEl(current)?.offsetHeight || 0;
+    if (!h) return; // not on screen yet; measured when it is
+    if (fitInstant) {
+      viewport.classList.add('instant');
+      requestAnimationFrame(() => { viewport.classList.remove('instant'); fitInstant = false; });
     }
+    viewport.style.height = `${h}px`;
   }
-  bar.addEventListener('mouseleave', () => layout(refresh));
+  const sizer = new ResizeObserver(fit);
+
+  function show(instant) {
+    const i = Math.max(0, pages.indexOf(current));
+    track.classList.toggle('instant', !!instant);
+    track.style.transform = `translateX(${-i * CARD_W}px)`;
+    homeBtn.classList.toggle('on', current === 'home');
+    for (const c of cards) c.tab.classList.toggle('on', c.id === current);
+    if (instant) { void track.offsetWidth; track.classList.remove('instant'); }
+    fit();
+  }
+
+  function go(id, { instant = false } = {}) {
+    if (!pages.includes(id)) id = 'home';
+    current = id;
+    if (!instant) fitInstant = false; // moving between pages animates the height too
+    show(instant);
+    cards.find(c => c.id === id)?.def.onShow?.();
+    armReturn();
+  }
+
+  // With no click for a few seconds, slide back to the home page; not while something is in the middle of being used.
+  function armReturn() {
+    clearTimeout(returnTimer);
+    if (current === 'home') return;
+    returnTimer = setTimeout(() => {
+      if (cards.some(c => c.busyNow)) return armReturn();
+      go('home');
+    }, RETURN_MS);
+  }
+  bar.addEventListener('pointerdown', armReturn, true);
+  bar.addEventListener('keydown', armReturn, true);
+
+  // Two-finger swipe sideways moves between pages.
+  // A trackpad keeps sending scroll events for a second after the fingers lift (momentum), so a burst of events is
+  // one swipe: it moves one page, and only a pause in the events starts the next swipe.
+  let wheelX = 0;
+  let wheelLast = 0;
+  let wheelDone = false;
+  let wheelLock = 0; // a short cooldown after a move, while the slide runs, covers a momentum tail with gaps in it
+  viewport.addEventListener('wheel', e => {
+    if (Math.abs(e.deltaX) <= Math.abs(e.deltaY)) return;
+    e.preventDefault();
+    armReturn();
+    const now = Date.now();
+    if (now - wheelLast > 140) { wheelX = 0; wheelDone = false; } // the last swipe's momentum has died away
+    wheelLast = now;
+    if (wheelDone || now < wheelLock) return;
+    wheelX += e.deltaX;
+    if (Math.abs(wheelX) < 50) return;
+    wheelDone = true;
+    const next = pages[pages.indexOf(current) + (wheelX > 0 ? 1 : -1)];
+    if (next) { wheelLock = now + 400; go(next); }
+  }, { passive: false });
+
+  // --- the capsule --------------------------------------------------------------------
+
+  // Live cues: each card can put a small indicator on the capsule while it has something live.
+  const cues = new Map(); // card id -> node
+  function renderHandle() {
+    const nodes = cards.filter(c => c.live && on(c) && cues.get(c.id)).sort(byOrder).map(c => cues.get(c.id));
+    hind.replaceChildren(...nodes);
+    handle.classList.toggle('live', nodes.length > 0);
+  }
+
+  // Hovering the capsule opens the card. Leaving closes it after a short grace, so grazing the edge doesn't snap it shut.
+  let closeTimer;
+  const closeNow = () => {
+    bar.classList.remove('open');
+    go('home', { instant: true });
+    clearTimeout(returnTimer);
+  };
+  bar.addEventListener('mouseenter', () => {
+    clearTimeout(closeTimer);
+    // Hovering an announcement takes it over: it grows to the whole card, and closes for good when you leave.
+    for (const t of peeks.values()) clearTimeout(t);
+    peeks.clear();
+    if (!bar.classList.contains('peek')) fitInstant = true; // opening from nothing is measured at once; from the small card it animates
+    bar.classList.add('open');
+    bar.classList.remove('peek');
+    syncMini();
+    fit();
+  });
+  bar.addEventListener('mouseleave', () => {
+    clearTimeout(closeTimer);
+    closeTimer = setTimeout(closeNow, CLOSE_GRACE_MS);
+  });
+
+  // A card can announce something by opening the bar on its own for a moment (on the home page).
+  const peeks = new Map(); // card id -> timer (or true)
+  function updatePeek() {
+    const was = bar.classList.contains('peek');
+    bar.classList.toggle('peek', peeks.size > 0);
+    syncMini();
+    if (!was && peeks.size > 0 && !bar.classList.contains('open')) { fitInstant = true; go('home', { instant: true }); }
+  }
+
+  // The small announcement: the bar opened by itself for a card (not from the command bar) and isn't being hovered.
+  function syncMini() {
+    const mini = !bar.classList.contains('open') && peeks.size > 0 && !peeks.has('command');
+    if (bar.classList.contains('mini') === mini) return;
+    bar.classList.toggle('mini', mini);
+    relayout();
+  }
+
+  // Open the bar on one page without hovering, e.g. from the command bar. It closes by itself after a while, or as soon
+  // as you hover it and leave.
+  const OPEN_FOR_MS = 8000;
+  function openAt(page) {
+    clearTimeout(peeks.get('command'));
+    peeks.set('command', setTimeout(() => { peeks.delete('command'); updatePeek(); }, OPEN_FOR_MS));
+    fitInstant = true;
+    updatePeek();
+    go(pages.includes(page) ? page : 'home', { instant: !bar.classList.contains('open') });
+  }
+
+  // --- registering ------------------------------------------------------------------
 
   const messageHandlers = [];
   if (alive()) {
     chrome.runtime.onMessage.addListener(msg => {
       if (msg.type === 'toast') toast(msg.text);
+      if (msg.type === 'open-action-bar') openAt(msg.page);
       messageHandlers.forEach(h => h(msg));
     });
   }
 
-  // def: { id, title, icon (svg string), onClick?, css?, lift?, onMessage?(msg), setup?(ctx) }
-  // lift: this slot moves above the bar, instead of beside the chip, while another button's chip is open.
   function register(def) {
-    const slot = document.createElement('div');
-    slot.className = `slot ${def.id}`;
-    if (def.lift) slot.classList.add('lift');
-    const pop = document.createElement('div');
-    pop.className = 'pop';
-    const chip = document.createElement('div');
-    chip.className = 'chip';
-    const btn = document.createElement('div');
-    btn.className = 'btn';
-    btn.title = def.title || '';
-    btn.innerHTML = def.icon || '';
-    if (def.onClick) btn.onclick = def.onClick;
-    slot.append(pop, chip, btn);
+    const card = {
+      id: def.id, def, kind: def.kind || 'card', side: def.side || 'left', order: def.order ?? 50,
+      setting: { 'copy-url': 'copyUrl', 'command-bar': 'commandBar' }[def.id] || def.id, hasHome: def.home !== false && (def.kind || 'card') === 'card',
+      available: false, homeVisible: undefined, live: false, siteOn: true, busyNow: false
+    };
+    card.homeEl = el('div', 'hs');
+    card.homeEl.hidden = true;
+    card.page = el('div', 'page');
+    card.detail = card.page;
+    card.tab = el('button', 'tab' + (card.kind === 'action' ? ' act' : ''));
+    card.tab.type = 'button';
+    card.tab.title = card.tab.ariaLabel = def.title || def.id;
+    card.tab.innerHTML = def.icon || '';
+    card.tab.style.setProperty('--tc', def.color || '#f2f2f7');
+    card.tab.onclick = () => (def.onClick ? def.onClick() : go(card.id));
+    // A section on the home page opens that card's detail page when you click it (not one of its own buttons).
+    card.homeEl.addEventListener('click', e => {
+      if (bar.classList.contains('mini')) return;
+      if (card.kind === 'card' && card.available && def.detail !== false && !e.target.closest('button, a, input')) go(card.id);
+    });
+    card.homeEl.classList.toggle('link', card.kind === 'card' && def.detail !== false);
 
     if (def.css) {
-      const style = document.createElement('style');
+      const style = el('style');
       style.textContent = def.css;
       root.prepend(style);
     }
     if (def.onMessage) messageHandlers.push(def.onMessage);
-    bar.append(slot);
-
-    // A slot shows only if its button is turned on in settings, isn't disabled for this site, and has
-    // something to show (shown).
-    const settingKey = { 'copy-url': 'copyUrl' }[def.id] || def.id;
-    let shown = true;
-    let siteOn = true;
-    const refreshSlot = () => {
-      const on = settings().buttons[settingKey] !== false && siteOn && shown;
-      slot.style.display = on ? '' : 'none';
-    };
-    slotRefreshers.push(refreshSlot);
+    cards.push(card);
 
     const ctx = {
-      pop, chip, btn, send, toast, root,
-      // on: show the chip. live: keep this button showing while the bar is collapsed.
-      setActive: on => {
-        if (slot.classList.contains('on') !== on) layout(() => { slot.classList.toggle('on', on); refresh(); });
+      home: card.homeEl, detail: card.page, root, send, toast,
+      setAvailable: v => { if (card.available !== !!v) { card.available = !!v; relayout(); } },
+      setHomeVisible: v => { if (card.homeVisible !== !!v) { card.homeVisible = !!v; relayout(); } },
+      setLive: v => { card.live = !!v; renderHandle(); },
+      setIndicator: node => { cues.set(card.id, node); renderHandle(); },
+      setTab: node => card.tab.replaceChildren(node),
+      setColor: c => card.tab.style.setProperty('--tc', c),
+      setEnabled: v => { card.siteOn = !!v; relayout(); },
+      peek: ms => {
+        clearTimeout(peeks.get(card.id));
+        peeks.delete(card.id);
+        if (ms !== 0) peeks.set(card.id, ms > 0 ? setTimeout(() => { peeks.delete(card.id); updatePeek(); }, ms) : true);
+        updatePeek();
       },
-      setLive: on => { slot.classList.toggle('live', on); refresh(); },
-      setVisible: on => { shown = on; refreshSlot(); refresh(); },
-      setEnabled: on => { siteOn = on; refreshSlot(); refresh(); },
-      isHovered: () => slot.matches(':hover')
+      go: () => go(card.id),
+      busy: v => { card.busyNow = !!v; },
+      isOpen: () => bar.classList.contains('open') || bar.classList.contains('peek')
     };
     def.setup?.(ctx);
-    refreshSlot();
+    relayout();
     return ctx;
   }
 
-  // Hidden until settings have loaded, when turned off, and during fullscreen video (also covers a
-  // fullscreen player inside an iframe).
+  // --- the host --------------------------------------------------------------------
+
+  // Hidden until settings have loaded, when turned off, and during fullscreen video (also covers a fullscreen
+  // player inside an iframe).
   let ready = false;
-  const settings = () => globalThis.Settings.current;
-  const slotRefreshers = [];
   function refreshHost() {
     host.style.display = !ready || !settings().bar.enabled || document.fullscreenElement ? 'none' : '';
   }
   function applySettings() {
     refreshHost();
-    slotRefreshers.forEach(fn => fn());
-    refresh();
+    relayout();
   }
   document.addEventListener('fullscreenchange', refreshHost);
   globalThis.Settings.load().then(() => { ready = true; applySettings(); }).catch(() => {});

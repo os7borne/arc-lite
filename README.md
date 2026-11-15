@@ -12,13 +12,15 @@ A Manifest V3 Chromium extension that brings a few of Arc's best touches to any 
 
 ## Features
 
-- **Action bar**: a small row of buttons pinned to the bottom-left of every page. Each button lives in its own file under `buttons/`.
+- **Action bar**: a small capsule pinned to the bottom-left of every page. At rest it carries a live cue for what's running (the focus ring and time, a download's progress, artwork and moving bars for media). Hover it and it opens one card: a home page with a section for everything active, and a detail page for each thing (the full media player, the latest three downloads, the focus controls, snooze), reached with the buttons along the bottom or a sideways swipe. With no click for five seconds, it slides back home. Each card lives in its own file under `buttons/`.
   - **Media**: a mini player for each playing `<video>`/`<audio>` source (play/pause, seek, mute, picture-in-picture, and next/previous on YouTube, YouTube Music and Spotify). It works across frames.
   - **Downloads**: shows the latest download as a chip, with the three most recent downloads on hover. It can hide the browser's native downloads UI. Drag a finished download onto a page to drop it into an upload area (Esc cancels; can be turned off in settings). Chrome shows its "started debugging this browser" banner for a moment while the file is dropped.
   - **Copy URL**: copies the current tab's URL (`Cmd+Shift+C` on Mac, `Ctrl+Shift+C` elsewhere) and shows a toast.
 - **Command bar** (`Cmd/Ctrl+Shift+K`, plus a configurable in-page shortcut, default `Cmd/Ctrl+T`): one box that searches open tabs, actions, history, recently closed tabs and the web. It renders as an overlay iframe, or as a popup window on pages where scripts can't run (`chrome://`, the Web Store, PDFs).
 - **Start page** (replaces the new tab page): clock, greeting, search box, top sites, a small to-do list, and a background that is a gradient, a solid colour, your own photo, or a daily photo from Bing, Wikipedia, NASA or Picsum.
 - **Session restore**: snapshots all windows, tabs and tab groups, and reopens them on browser start if the browser didn't restore them itself.
+- **Snooze tabs**: "Snooze tab…" in the command bar (or type `snooze 2h`, `snooze tomorrow 9am`, `snooze fri`) closes the tab now and reopens it later, with a notification, where you left off. Search your snoozed tabs with `snoozed`; Cmd/Ctrl+Backspace drops one. A browser that was closed when one came due reopens it on the next start.
+- **Focus mode**: a pomodoro timer (25 minutes of focus, 5 off, a longer break every fourth session; all adjustable) that blocks a list of distracting sites while a focus session runs. The action bar shows the live countdown on its capsule, a row on the home card and a detail page with every control. When a phase ends, the bar opens on its own with a one-click "Start break" or "Start focus" (or turn on auto-start in settings). Pausing, skipping or stopping a focus session takes a 10 second wait, enforced in the service worker. Blocked sites, including tabs already open on them, show a focus page and return to the site when the session ends. Start it from the action bar or the command bar.
 - **Settings page**: opened from the toolbar icon (configurable to open the start page or the Downloads folder instead).
 
 ## Install
@@ -54,7 +56,7 @@ Requires Chrome 116 or newer. Keyboard shortcuts can be changed at `chrome://ext
 
 ## Permissions
 
-`<all_urls>` is needed for the action bar, media agent and command bar content scripts. Other permissions: `tabs`, `tabGroups`, `sessions`, `history`, `topSites`, `search` and `favicon` (command bar, start page, session restore), `downloads*` (downloads button), `debugger` (only to drop a dragged download onto a page; it is attached for that moment and then released), `offscreen`, `scripting` and `activeTab` (clipboard), `storage` and `unlimitedStorage` (settings, photos, session snapshot), and `alarms` (daily photo).
+`<all_urls>` is needed for the action bar, media agent and command bar content scripts. Other permissions: `tabs`, `tabGroups`, `sessions`, `history`, `topSites`, `search` and `favicon` (command bar, start page, session restore), `downloads*` (downloads button), `debugger` (only to drop a dragged download onto a page; it is attached for that moment and then released), `offscreen`, `scripting` and `activeTab` (clipboard), `storage` and `unlimitedStorage` (settings, photos, session snapshot), and `alarms` (daily photo, focus timer), `declarativeNetRequest` (focus mode redirects blocked sites), `notifications` (focus phase changes) and `clipboardRead` (command bar paste actions).
 
 Network requests are limited to the daily-photo sources you pick (Bing, Wikimedia, NASA, Picsum), and are sent without credentials. Nothing is sent anywhere else.
 

@@ -16,6 +16,10 @@ let allTabs = [];
 let items = [];
 let active = 0;
 let seq = 0;
+let focusState = { phase: 'off' };
+let snoozed = [];       // tabs put to sleep until later
+let snoozing = false;   // choosing when to wake the current tab
+const DEFAULT_PLACEHOLDER = $('#q').placeholder;
 
 const close = () => (popup ? window.close() : parent.postMessage({ source: 'arclite-command-bar', type: 'close' }, '*'));
 
@@ -27,7 +31,8 @@ const ICONS = {
   search: svg('<circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/>'),
   go: svg('<line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/>'),
   action: svg('<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>'),
-  undo: svg('<polyline points="1 4 1 10 7 10"/><path d="M3.5 15a9 9 0 1 0 2.1-9.4L1 10"/>')
+  undo: svg('<polyline points="1 4 1 10 7 10"/><path d="M3.5 15a9 9 0 1 0 2.1-9.4L1 10"/>'),
+  clock: svg('<circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/>')
 };
 
 const favicon = url => `/_favicon/?pageUrl=${encodeURIComponent(url)}&size=32`;
@@ -138,7 +143,7 @@ function buildActions() {
   ];
   if (t) {
     list.push(
-      { title: 'Copy URL', keywords: 'link address', run: () => copy(t.url) },
+      { title: 'Copy URL', keywords: 'copy link address', run: () => copy(t.url) },
       { title: 'Copy URL as Markdown', keywords: 'link md', run: () => copy(`[${t.title}](${t.url})`) },
       { title: 'Duplicate tab', keywords: 'copy clone', run: () => chrome.tabs.duplicate(t.id) },
       { title: t.pinned ? 'Unpin tab' : 'Pin tab', keywords: 'favorite', run: () => chrome.tabs.update(t.id, { pinned: !t.pinned }) },
@@ -168,6 +173,37 @@ function buildActions() {
       );
     }
   }
+  // Snooze: close this tab now and bring it back later.
+  if (t && t.url && !t.url.startsWith(own)) {
+    list.push({ title: 'Snooze tab…', keywords: 'later remind hide wake reopen', keepOpen: true, run: startSnooze });
+  }
+  if (snoozed.length) {
+    list.push({ title: `Snoozed tabs (${snoozed.length})`, keywords: 'snooze later woke wake', keepOpen: true, run: () => { input.value = 'snoozed '; refresh(); } });
+  }
+  // The action bar's cards: open it on the overview, or straight to one of them.
+  if (t && /^(https?|chrome-extension):/.test(t.url || '')) {
+    const openCard = page => () => chrome.tabs.sendMessage(t.id, { type: 'open-action-bar', page }, { frameId: 0 }).catch(() => {});
+    list.push(
+      { title: 'Open action bar', keywords: 'overview capsule card panel', run: openCard('home') },
+      { title: 'Show media player', keywords: 'action bar music video playing', run: openCard('media') },
+      { title: 'Show downloads', keywords: 'action bar files latest', run: openCard('downloads') },
+      { title: 'Show focus timer', keywords: 'action bar pomodoro focus break', run: openCard('focus') },
+      { title: 'Show snooze options', keywords: 'action bar later remind', run: openCard('snooze') }
+    );
+  }
+  // Focus mode: starting is always allowed; pausing and stopping live in the action bar, behind its wait.
+  if (focusState.phase !== 'focus') {
+    list.push({ title: 'Start focus', keywords: 'pomodoro timer block distractions', run: () => chrome.runtime.sendMessage({ type: 'focus-start', phase: 'focus' }) });
+  }
+  if (focusState.phase === 'off') {
+    list.push({ title: 'Start break', keywords: 'pomodoro rest', run: () => chrome.runtime.sendMessage({ type: 'focus-start', phase: 'break' }) });
+  }
+  if (t && /^https?:/i.test(t.url || '')) {
+    const host = hostOf(t.url);
+    if (host && !Settings.hostMatches(host, settings.focus.blocklist)) {
+      list.push({ title: `Block ${host} during focus`, keywords: 'focus distraction blocklist add', run: () => Settings.save(d => { d.focus.blocklist.push(host); }) });
+    }
+  }
   list.push(
     { title: 'Paste and go', keywords: 'clipboard open url search', run: pasteAndGo },
     { title: 'Open URLs from clipboard', keywords: 'paste links tabs', run: openClipboardUrls }
@@ -182,6 +218,44 @@ function buildActions() {
   return list;
 }
 
+// --- snooze ---------------------------------------------------------------------
+
+function startSnooze() {
+  snoozing = true;
+  input.value = '';
+  input.placeholder = 'Snooze until…  e.g. 2h, tomorrow 9am, fri';
+  refresh();
+}
+function stopSnooze() {
+  snoozing = false;
+  input.placeholder = DEFAULT_PLACEHOLDER;
+  input.value = '';
+  refresh();
+}
+
+// The ways to wake the current tab: what you typed, if it makes sense, and the usual choices.
+function snoozeRows(rest) {
+  if (!tab) return [];
+  const now = new Date();
+  const row = (title, date) => ({
+    type: 'snooze', key: 'z:' + title, title, sub: SnoozeTimes.fmtWhen(date, now), glyph: ICONS.clock, tag: 'Snooze',
+    run: () => chrome.runtime.sendMessage({ type: 'snooze-tab', tabId: tab.id, wakeAt: date.getTime() })
+  });
+  const parsed = rest ? SnoozeTimes.parseWhen(rest, now) : null;
+  if (parsed) return [row(`Snooze until ${SnoozeTimes.fmtWhen(parsed, now)}`, parsed)];
+  const words = rest.toLowerCase().split(/\s+/).filter(Boolean);
+  const rows = SnoozeTimes.presets(now).filter(p => !words.length || matchScore(p.label, words) >= 0).map(p => row(p.label, p.when));
+  if (!rows.length) {
+    rows.push({ type: 'hint', title: 'Try “2h”, “tomorrow 9am”, “fri” or “next week”', sub: '', glyph: ICONS.clock, tag: 'Snooze', keepOpen: true, run: () => {} });
+  }
+  return rows;
+}
+
+const snoozedRow = i => ({
+  type: 'snoozed', key: 's:' + i.id, id: i.id, title: i.title, sub: `Wakes ${SnoozeTimes.fmtWhen(new Date(i.wakeAt))} · ${hostOf(i.url)}`,
+  icon: favicon(i.url), tag: 'Snoozed', run: () => chrome.runtime.sendMessage({ type: 'snooze-wake', id: i.id })
+});
+
 const QUICK_ACTIONS = ['New tab', 'Copy URL', 'Reopen closed tab', 'Settings'];
 
 async function compute(raw) {
@@ -190,6 +264,18 @@ async function compute(raw) {
   const query = actionOnly ? text.slice(1).trim() : text;
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
   const out = [];
+  snoozed = (await chrome.storage.local.get('snoozed').catch(() => ({}))).snoozed || [];
+
+  // Choosing a wake time: after "Snooze tab…", or by typing "snooze 2h".
+  if (!actionOnly) {
+    const rest = snoozing ? text : /^snooze\b/i.test(text) ? text.replace(/^snooze\b\s*/i, '') : null;
+    if (rest !== null) return snoozeRows(rest);
+    if (/^snoozed\b/i.test(text)) {
+      const w = text.replace(/^snoozed\b\s*/i, '').toLowerCase().split(/\s+/).filter(Boolean);
+      const rows = snoozed.filter(i => !w.length || matchScore(`${i.title} ${i.url}`, w) >= 0).map(snoozedRow);
+      return rows.length ? rows : [{ type: 'hint', title: 'No snoozed tabs', sub: '', glyph: ICONS.clock, tag: 'Snoozed', keepOpen: true, run: () => {} }];
+    }
+  }
 
   const tabRow = (t, tag = 'Tab') => ({
     type: 'tab', key: 'u:' + t.url, title: t.title || t.url, sub: hostOf(t.url), icon: favicon(t.url), tag, tabId: t.id,
@@ -205,7 +291,7 @@ async function compute(raw) {
     return { type: 'closed', key: 'u:' + url, title, url, sub: isTab ? hostOf(s.tab.url) : '', icon: url ? favicon(url) : '', glyph: ICONS.undo,
              tag: 'Closed', run: () => chrome.sessions.restore(isTab ? s.tab.sessionId : s.window.sessionId) };
   };
-  const actionRow = a => ({ type: 'action', key: 'a:' + a.title.replace(/\s*\(\d+\)$/, ''), title: a.title, sub: '', glyph: ICONS.action, tag: 'Action', run: a.run });
+  const actionRow = a => ({ type: 'action', key: 'a:' + a.title.replace(/\s*\(\d+\)$/, ''), title: a.title, sub: '', glyph: ICONS.action, tag: 'Action', keepOpen: a.keepOpen, run: a.run });
 
   // The extension's own pages (start page, settings) aren't offered as tabs to jump to.
   const openTabs = allTabs.filter(t => !t.url.startsWith(own));
@@ -250,6 +336,7 @@ async function compute(raw) {
       run: alt => openUrl(h.url, alt)
     }));
 
+  snoozed.filter(i => matchScore(`${i.title} ${i.url}`, words) >= 0).slice(0, 3).forEach(i => out.push(snoozedRow(i)));
   closedRows.filter(r => matchScore(`${r.title} ${r.url}`, words) >= 0).slice(0, 3).forEach(r => out.push(r));
 
   if (!looksLikeUrl(query) && query !== ghost) {
@@ -385,7 +472,7 @@ async function run(i, alt) {
   const it = items[i];
   if (!it) return;
   recordPick(typedText(), it.key);
-  try { await it.run(alt); } finally { close(); }
+  try { await it.run(alt); } finally { if (!it.keepOpen) close(); }
 }
 
 async function refresh() {
@@ -402,7 +489,8 @@ input.addEventListener('input', e => {
   ghost = '';
   const typed = input.value;
   // Don't fight deletions or IME composition; only complete when the caret is at the end.
-  if (settings.commandBar.autocompleteHosts !== false && typed && !e.isComposing && !/^delete/.test(e.inputType || '') &&
+  // (Not while choosing a snooze time: "fri" shouldn't turn into a website.)
+  if (settings.commandBar.autocompleteHosts !== false && typed && !snoozing && !/^snooze/i.test(typed) && !e.isComposing && !/^delete/.test(e.inputType || '') &&
       input.selectionStart === typed.length) {
     const host = completeHost(typed);
     if (host) {
@@ -431,7 +519,15 @@ input.addEventListener('keydown', async e => {
     input.setSelectionRange(input.value.length, input.value.length);
   } else if (e.key === 'Escape') {
     e.preventDefault();
-    close();
+    if (snoozing) stopSnooze(); else close();
+  } else if (e.key === 'Backspace' && snoozing && !input.value) {
+    e.preventDefault();
+    stopSnooze();
+  } else if (e.key === 'Backspace' && (e.metaKey || e.ctrlKey) && items[active]?.type === 'snoozed') {
+    // Cmd/Ctrl+Backspace on a snoozed tab drops it for good.
+    e.preventDefault();
+    await chrome.runtime.sendMessage({ type: 'snooze-delete', id: items[active].id });
+    refresh();
   } else if (e.key === 'Backspace' && (e.metaKey || e.ctrlKey) && items[active]?.type === 'tab') {
     // Cmd/Ctrl+Backspace closes the highlighted tab without leaving the bar.
     e.preventDefault();
@@ -452,6 +548,8 @@ $('#backdrop').addEventListener('mousedown', e => { if (e.target.id === 'backdro
   const newFirst = settings.commandBar.openIn !== 'current';
   $('#primary').textContent = newFirst ? 'new tab' : 'this tab';
   $('#alt').textContent = newFirst ? 'this tab' : 'new tab';
+  if (params.get('q')) input.value = params.get('q');
+  chrome.storage.local.get('focusState').then(r => { focusState = r.focusState || focusState; });
   loadHosts();
   await loadPicks();
   await refresh();

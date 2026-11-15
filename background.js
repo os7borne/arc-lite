@@ -1,4 +1,4 @@
-importScripts('settings.js', 'session.js');
+importScripts('settings.js', 'session.js', 'focus.js', 'snooze.js');
 
 async function ensureOffscreen() {
   if (await chrome.offscreen.hasDocument()) return;
@@ -178,8 +178,12 @@ async function thumbFor(d) {
 }
 
 async function snapshot() {
-  const recent = await chrome.downloads.search({ orderBy: ['-startTime'], limit: 3 });
-  const items = await Promise.all(recent.map(async d => {
+  // The latest few, for the downloads page (deleted files included, shown struck through). The home card shows only the
+  // latest file that still exists, which can be older than those few, so look a little further back for it.
+  const found = await chrome.downloads.search({ orderBy: ['-startTime'], limit: 12 });
+  const recent = found.slice(0, 3);
+  const available = found.find(d => d.exists !== false);
+  const describe = async d => {
     let icon = '';
     try { icon = await chrome.downloads.getFileIcon(d.id, { size: 32 }); } catch (_) {}
     const thumb = await thumbFor(d);
@@ -197,10 +201,12 @@ async function snapshot() {
       icon,
       thumb
     };
-  }));
+  };
+  const items = await Promise.all(recent.map(describe));
+  const latest = available ? (items.find(i => i.id === available.id) || await describe(available)) : null;
   // remaining: -1 = stay (download running), 0 = hidden, >0 = ms left before fading out
-  const remaining = items[0]?.state === 'in_progress' ? -1 : Math.max(0, revealUntil - Date.now());
-  return { items, remaining };
+  const remaining = latest?.state === 'in_progress' ? -1 : latest ? Math.max(0, revealUntil - Date.now()) : 0;
+  return { items, latest, remaining };
 }
 
 async function broadcast() {
@@ -237,6 +243,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === 'open-file') chrome.downloads.open(msg.id);
   if (msg.type === 'show-file') chrome.downloads.show(msg.id);
   if (msg.type === 'open-folder') chrome.downloads.showDefaultFolder();
+  if (msg.type === 'open-downloads-page') chrome.tabs.create({ url: 'chrome://downloads' });
   if (msg.type === 'drop-file') {
     dropFile(sender.tab?.id, msg.id, msg.x, msg.y).then(() => sendResponse({}), e => sendResponse({ error: String(e.message || e) }));
     return true;
@@ -343,11 +350,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     }).then(broadcastMedia);
   } else if (msg.type === 'pip-hint' && sender.tab) {
     chrome.tabs.sendMessage(sender.tab.id, { type: 'toast', text: msg.text || 'Click the page to open Picture-in-Picture' }, { frameId: 0 }).catch(() => {});
+  } else if (msg.type === 'undo-close-tab') {
+    undoCloseTab().then(restored => sendResponse({ restored }), () => sendResponse({ restored: false }));
+    return true;
   } else if (msg.type === 'restore-session') {
     restoreSession();
   } else if (msg.type === 'toggle-command-bar' && sender.tab) {
     // pressed inside a subframe: the top frame shows the overlay
-    chrome.tabs.sendMessage(sender.tab.id, { type: 'toggle-command-bar' }, { frameId: 0 }).catch(() => {});
+    chrome.tabs.sendMessage(sender.tab.id, { type: 'toggle-command-bar', query: msg.query }, { frameId: 0 }).catch(() => {});
   } else if (msg.type === 'refresh-photo') {
     refreshPhoto(msg.force).then(ok => sendResponse(ok));
     return true;
@@ -381,6 +391,20 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 });
 
+// Cmd/Ctrl+Z reopens a tab closed in the last few seconds. Kept in session storage: the worker can be stopped.
+const UNDO_CLOSE_MS = 10000;
+chrome.tabs.onRemoved.addListener((id, info) => {
+  // A snoozed tab isn't an accident to undo, and closing a whole window isn't a tab close.
+  if (!info.isWindowClosing && !snoozingTabs.delete(id)) chrome.storage.session.set({ lastTabClosedAt: Date.now() });
+});
+async function undoCloseTab() {
+  if (!(await Settings.load()).tabs.undoClose) return false; // reload: the worker may have just woken up
+  const { lastTabClosedAt = 0 } = await chrome.storage.session.get('lastTabClosedAt');
+  if (Date.now() - lastTabClosedAt > UNDO_CLOSE_MS) return false;
+  await chrome.storage.session.remove('lastTabClosedAt'); // one undo per close
+  return chrome.sessions.restore().then(() => true, () => false);
+}
+
 chrome.tabs.onRemoved.addListener(tabId => {
   withMedia(media => {
     for (const k of Object.keys(media)) if (media[k].tabId === tabId) delete media[k];
@@ -403,7 +427,7 @@ chrome.runtime.onInstalled.addListener(async () => {
       if (running) continue;
       await chrome.scripting.executeScript({
         target: { tabId: t.id },
-        files: ['settings.js', 'action-bar.js', 'buttons/media.js', 'buttons/downloads.js', 'buttons/copy-url.js']
+        files: ['settings.js', 'snooze-times.js', 'action-bar.js', 'buttons/media.js', 'buttons/downloads.js', 'buttons/focus.js', 'buttons/snooze.js', 'buttons/copy-url.js', 'buttons/command-bar.js']
       });
       await chrome.scripting.executeScript({ target: { tabId: t.id }, files: ['pip-shim.js'], world: 'MAIN' });
       await chrome.scripting.executeScript({ target: { tabId: t.id, allFrames: true }, files: ['media-agent.js'] });

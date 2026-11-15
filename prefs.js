@@ -45,14 +45,27 @@ function bindControls() {
 
 // --- list editors (site lists) ----------------------------------------------------
 
+// A list that can't be changed while a focus session runs, so a blocked site can't just be removed from it.
+let focusLocked = false;
+const lockedNow = el => el.dataset.lock === 'focus' && focusLocked;
+
+// Keeps the path for lists that take one ("youtube.com/watch"); otherwise reduces to a host.
+const normalizeSite = (raw, paths) => {
+  if (!paths) return Settings.normalizeHost(raw);
+  const s = String(raw || '').trim().toLowerCase().replace(/^[a-z][a-z0-9+.-]*:\/\//, '').replace(/^www\./, '').split(/[?#]/)[0].replace(/\/+$/, '');
+  return s;
+};
+
 function bindList(el) {
   const path = el.dataset.key;
   const render = () => {
     const sites = get(Settings.current, path);
+    const locked = lockedNow(el);
     const input = document.createElement('input');
-    input.placeholder = 'Add a site, e.g. youtube.com';
+    input.placeholder = locked ? 'Locked during focus' : el.hasAttribute('data-paths') ? 'Add a site or path' : 'Add a site, e.g. youtube.com';
+    input.disabled = locked;
     const add = () => {
-      const host = Settings.normalizeHost(input.value);
+      const host = normalizeSite(input.value, el.hasAttribute('data-paths'));
       if (!host || sites.includes(host)) { input.value = ''; return; }
       update(path, [...sites, host]).then(render);
     };
@@ -64,17 +77,31 @@ function bindList(el) {
         const chip = document.createElement('span');
         chip.className = 'chip';
         chip.textContent = site;
-        const x = document.createElement('button');
-        x.textContent = '✕';
-        x.title = 'Remove';
-        x.onclick = () => update(path, sites.filter(s => s !== site)).then(render);
-        chip.append(x);
+        if (!locked) {
+          const x = document.createElement('button');
+          x.textContent = '✕';
+          x.title = 'Remove';
+          x.onclick = () => update(path, sites.filter(s => s !== site)).then(render);
+          chip.append(x);
+        }
         return chip;
       }),
       input
     );
   };
+  el.rerender = render;
   render();
+}
+
+async function watchFocusLock() {
+  const apply = state => {
+    focusLocked = state?.phase === 'focus' && !state.paused && Settings.current.focus.friction !== false;
+    $('#focusLock').hidden = !focusLocked;
+    $('[data-key="focus.friction"]').disabled = focusLocked; // can't be switched off to get around the lock
+    $$('.list[data-lock]').forEach(el => el.rerender?.());
+  };
+  apply((await chrome.storage.local.get('focusState')).focusState);
+  chrome.storage.onChanged.addListener((c, area) => area === 'local' && c.focusState && apply(c.focusState.newValue));
 }
 
 // --- background ------------------------------------------------------------------
@@ -253,6 +280,7 @@ function bindMisc() {
   await Settings.load();
   bindControls();
   $$('.list').forEach(bindList);
+  watchFocusLock();
   bindShortcut();
   bindBackground();
   renderBackground();

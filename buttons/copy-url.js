@@ -1,4 +1,4 @@
-// Copy URL button, plus the Cmd/Ctrl+Shift+C shortcut handled in the page so it works without
+// Copy URL: a button at the right of the action bar's pager, plus the Cmd/Ctrl+Shift+C shortcut handled in the page so it works without
 // assigning it in chrome://extensions/shortcuts (Chrome won't auto-assign it: it clashes with DevTools).
 (() => {
   const actionBar = globalThis.__actionBar;
@@ -25,8 +25,11 @@
 
   actionBar.register({
     id: 'copy-url',
+    kind: 'action',
+    side: 'right',
+    order: 95,
     title: `Copy URL (${isMac ? '⌘' : 'Ctrl+'}⇧C)`,
-    icon: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${LINK}</svg>`,
+    icon: `<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${LINK}</svg>`,
     onClick: copy
   });
 

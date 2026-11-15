@@ -22,7 +22,9 @@
     "favicon",
     "unlimitedStorage",
     "alarms",
-    "debugger"
+    "debugger",
+    "declarativeNetRequest",
+    "notifications"
   ],
   "background": {
     "service_worker": "background.js"
@@ -57,10 +59,14 @@
       ],
       "js": [
         "settings.js",
+        "snooze-times.js",
         "action-bar.js",
         "buttons/media.js",
         "buttons/downloads.js",
-        "buttons/copy-url.js"
+        "buttons/focus.js",
+        "buttons/snooze.js",
+        "buttons/copy-url.js",
+        "buttons/command-bar.js"
       ],
       "run_at": "document_idle"
     },
@@ -119,6 +125,14 @@
         "<all_urls>"
       ],
       "use_dynamic_url": true
+    },
+    {
+      "resources": [
+        "blocked.html"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
     }
   ]
 }
