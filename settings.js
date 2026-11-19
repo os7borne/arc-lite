@@ -22,6 +22,7 @@
                   'snapchat.com', 'youtube.com', 'twitch.tv', 'netflix.com', 'linkedin.com'],
       allowlist: [] // exceptions: "youtube.com/watch" lets just that path through
     },
+    feed: { hideVideo: { x: false, linkedin: false } }, // hide posts that contain a video or GIF
     copyUrl: { shortcut: true },
     tabs: { undoClose: true, undoCloseKeys: 'option' }, // reopen a tab closed in the last few seconds; keys: option (Option+Z) | shift (Cmd+Shift+Z) | plain (Cmd+Z) | all
     session: { restoreOnStartup: true },

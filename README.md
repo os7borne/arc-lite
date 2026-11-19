@@ -22,6 +22,7 @@ A Manifest V3 Chromium extension that brings a few of Arc's best touches to any 
 - **Session restore**: snapshots all windows, tabs and tab groups, and reopens them on browser start if the browser didn't restore them itself.
 - **Snooze tabs**: "Snooze tab…" in the command bar (or type `snooze 2h`, `snooze tomorrow 9am`, `snooze fri`) closes the tab now and reopens it later, with a notification, where you left off. Search your snoozed tabs with `snoozed`; Cmd/Ctrl+Backspace drops one. A browser that was closed when one came due reopens it on the next start.
 - **Focus mode**: a pomodoro timer (25 minutes of focus, 5 off, a longer break every fourth session; all adjustable) that blocks a list of distracting sites while a focus session runs. The action bar shows the live countdown on its capsule, a row on the home card and a detail page with every control. When a phase ends, the bar opens on its own with a one-click "Start break" or "Start focus" (or turn on auto-start in settings). Pausing, skipping or stopping a focus session takes a 10 second wait, enforced in the service worker. Blocked sites, including tabs already open on them, show a focus page and return to the site when the session ends. Start it from the action bar or the command bar.
+- **Feed filter**: per-site switches (Settings > Feeds) that hide every post containing a video or GIF on X and LinkedIn, quoted posts included. Posts are hidden in place, so turning a switch off brings them straight back. A post you open on its own page stays visible.
 - **Settings page**: opened from the toolbar icon (configurable to open the start page or the Downloads folder instead).
 
 ## Install
@@ -41,6 +42,7 @@ Requires Chrome 116 or newer. Keyboard shortcuts can be changed at `chrome://ext
 | `session.js` | Session snapshot and restore (loaded into the service worker via `importScripts`) |
 | `settings.js` | Shared settings: defaults merged over a single object in `chrome.storage.local`. It is loaded everywhere and safe to inject twice |
 | `action-bar.js`, `buttons/*.js` | Action bar host (closed shadow DOM) and the individual buttons |
+| `feed-filter.js` | Content script on x.com, twitter.com and linkedin.com only: hides posts that contain video |
 | `media-agent.js` | Runs in every frame, finds the main media element, reports state and executes controls |
 | `command-bar.js`, `commandbar.{html,css,js}` | Command bar trigger/overlay (content script) and the UI (extension page) |
 | `newtab.{html,css,js}`, `newtab-boot.js` | Start page. The boot script swaps the browser's new tab for an identical `?f=1` tab so the search box can take focus |
